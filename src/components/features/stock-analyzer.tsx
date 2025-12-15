@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CandlestickChart } from "./candlestick-chart";
+import { StockNews } from "./stock-news";
 import { validateSymbol, RateLimiter } from "@/lib/validation";
 import type { StockData } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
@@ -715,6 +716,9 @@ export function StockAnalyzer() {
                 <CandlestickChart data={stockData.ohlc} />
               </CardContent>
             </Card>
+
+            {/* Stock News Section */}
+            <StockNews symbol={stockData.symbol} />
 
             {/* Metrics Grid */}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">

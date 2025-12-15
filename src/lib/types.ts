@@ -53,3 +53,14 @@ export interface MarketIndex {
   change: number;
   changePercent: number;
 }
+
+export interface NewsItem {
+  title: string;
+  url: string;
+  summary: string;
+  source: string;
+  publishedAt: string;
+  sentiment: "Bullish" | "Bearish" | "Neutral";
+  sentimentScore: number;
+  image?: string;
+}
