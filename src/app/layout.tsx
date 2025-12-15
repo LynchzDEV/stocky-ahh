@@ -15,9 +15,55 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Stockify - Stock Trend Analyzer",
-  description: "Stock analysis with 5-day Sharpe Ratio and USD/THB currency converter",
-  keywords: ["stock", "analyzer", "sharpe ratio", "currency converter", "USD", "THB"],
+  title: {
+    default: "stocky-ahh 📈 | Stock Trend Analyzer & Currency Converter",
+    template: "%s | stocky-ahh",
+  },
+  description:
+    "Real-time stock analysis, market trends, and USD/THB currency converter. Figure out if you're going to the moon 🌕 or holding the bag 🎒.",
+  keywords: [
+    "stock analyzer",
+    "market trends",
+    "currency converter",
+    "USD to THB",
+    "stock market",
+    "finance",
+    "investment",
+    "crypto",
+    "stonks",
+  ],
+  authors: [{ name: "lynchz", url: "https://github.com/lynchzdev" }],
+  creator: "lynchz",
+  openGraph: {
+    type: "website",
+    locale: "en_US",
+    url: "https://stocky-ahh.vercel.app",
+    title: "stocky-ahh 📈 | To the Moon or Bust?",
+    description:
+      "Visualize stock price movements, check market vibes, and convert your tendies to THB. Real-time data for the modern investor.",
+    siteName: "stocky-ahh",
+    images: [
+      {
+        url: "/logo.svg",
+        width: 1200,
+        height: 630,
+        alt: "stocky-ahh Application Interface",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "stocky-ahh 📈 | Stock Trend Analyzer",
+    description: "Real-time stock analysis and currency converter. 🚀",
+    images: ["/logo.svg"],
+    creator: "@lynchzdev",
+  },
+  icons: {
+    icon: "/logo.svg",
+    shortcut: "/logo.svg",
+    apple: "/logo.svg",
+  },
+  metadataBase: new URL("https://stocky-ahh.vercel.app"),
 };
 
 export default function RootLayout({
