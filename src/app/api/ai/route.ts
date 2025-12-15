@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSymbol } from "@/lib/validation";
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+const ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query";
 
 // Cache configuration
-const CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour in milliseconds
+const CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour for AI analysis
+const ALPHA_VANTAGE_CACHE_MS = 15 * 60 * 1000; // 15 minutes for Alpha Vantage data
+const FUNDAMENTALS_CACHE_MS = 60 * 60 * 1000; // 1 hour for fundamentals (changes less often)
 
 interface CacheEntry {
   analysis: AIAnalysis;
@@ -32,8 +35,9 @@ interface AIAnalysis {
   riskFactors: string[];
 }
 
-// In-memory cache (will reset on server restart)
+// In-memory caches
 const analysisCache = new Map<string, CacheEntry>();
+const alphaVantageCache = new Map<string, { data: unknown; timestamp: number }>();
 
 interface AIRequestBody {
   symbol: string;
@@ -52,11 +56,243 @@ interface AIRequestBody {
   };
 }
 
+// Alpha Vantage data interfaces
+interface RSIData {
+  value: number;
+  signal: string;
+}
+
+interface MACDData {
+  macd: number;
+  signal: number;
+  histogram: number;
+  trend: string;
+}
+
+interface CompanyOverview {
+  marketCap: string;
+  peRatio: string;
+  eps: string;
+  fiftyTwoWeekHigh: string;
+  fiftyTwoWeekLow: string;
+  dividendYield: string;
+  sector: string;
+  industry: string;
+}
+
+interface NewsSentiment {
+  title: string;
+  sentiment: string;
+  score: number;
+  source: string;
+  timeAgo: string;
+}
+
+// Helper to get cached Alpha Vantage data
+function getCachedData<T>(key: string, maxAge: number): T | null {
+  const cached = alphaVantageCache.get(key);
+  if (cached && Date.now() - cached.timestamp < maxAge) {
+    return cached.data as T;
+  }
+  return null;
+}
+
+// Helper to set cached data
+function setCachedData(key: string, data: unknown): void {
+  alphaVantageCache.set(key, { data, timestamp: Date.now() });
+}
+
+// Fetch RSI from Alpha Vantage
+async function fetchRSI(symbol: string, apiKey: string): Promise<RSIData | null> {
+  const cacheKey = `rsi_${symbol}`;
+  const cached = getCachedData<RSIData>(cacheKey, ALPHA_VANTAGE_CACHE_MS);
+  if (cached) return cached;
+
+  try {
+    const url = `${ALPHA_VANTAGE_BASE_URL}?function=RSI&symbol=${symbol}&interval=daily&time_period=14&series_type=close&apikey=${apiKey}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.Note || data.Information || !data["Technical Analysis: RSI"]) {
+      return null;
+    }
+
+    const rsiData = data["Technical Analysis: RSI"];
+    const latestDate = Object.keys(rsiData)[0];
+    const rsiValue = parseFloat(rsiData[latestDate].RSI);
+
+    let signal = "Neutral";
+    if (rsiValue >= 70) signal = "Overbought";
+    else if (rsiValue >= 60) signal = "Bullish";
+    else if (rsiValue <= 30) signal = "Oversold";
+    else if (rsiValue <= 40) signal = "Bearish";
+
+    const result: RSIData = { value: rsiValue, signal };
+    setCachedData(cacheKey, result);
+    return result;
+  } catch (error) {
+    console.error("Failed to fetch RSI:", error);
+    return null;
+  }
+}
+
+// Fetch MACD from Alpha Vantage
+async function fetchMACD(symbol: string, apiKey: string): Promise<MACDData | null> {
+  const cacheKey = `macd_${symbol}`;
+  const cached = getCachedData<MACDData>(cacheKey, ALPHA_VANTAGE_CACHE_MS);
+  if (cached) return cached;
+
+  try {
+    const url = `${ALPHA_VANTAGE_BASE_URL}?function=MACD&symbol=${symbol}&interval=daily&series_type=close&apikey=${apiKey}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.Note || data.Information || !data["Technical Analysis: MACD"]) {
+      return null;
+    }
+
+    const macdData = data["Technical Analysis: MACD"];
+    const latestDate = Object.keys(macdData)[0];
+    const latest = macdData[latestDate];
+
+    const macd = parseFloat(latest.MACD);
+    const signal = parseFloat(latest.MACD_Signal);
+    const histogram = parseFloat(latest.MACD_Hist);
+
+    let trend = "Neutral";
+    if (histogram > 0 && macd > signal) trend = "Bullish";
+    else if (histogram < 0 && macd < signal) trend = "Bearish";
+
+    const result: MACDData = { macd, signal, histogram, trend };
+    setCachedData(cacheKey, result);
+    return result;
+  } catch (error) {
+    console.error("Failed to fetch MACD:", error);
+    return null;
+  }
+}
+
+// Fetch Company Overview from Alpha Vantage
+async function fetchCompanyOverview(symbol: string, apiKey: string): Promise<CompanyOverview | null> {
+  const cacheKey = `overview_${symbol}`;
+  const cached = getCachedData<CompanyOverview>(cacheKey, FUNDAMENTALS_CACHE_MS);
+  if (cached) return cached;
+
+  try {
+    const url = `${ALPHA_VANTAGE_BASE_URL}?function=OVERVIEW&symbol=${symbol}&apikey=${apiKey}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.Note || data.Information || !data.Symbol) {
+      return null;
+    }
+
+    const result: CompanyOverview = {
+      marketCap: formatMarketCap(data.MarketCapitalization),
+      peRatio: data.PERatio || "N/A",
+      eps: data.EPS || "N/A",
+      fiftyTwoWeekHigh: data["52WeekHigh"] || "N/A",
+      fiftyTwoWeekLow: data["52WeekLow"] || "N/A",
+      dividendYield: data.DividendYield ? `${(parseFloat(data.DividendYield) * 100).toFixed(2)}%` : "N/A",
+      sector: data.Sector || "N/A",
+      industry: data.Industry || "N/A",
+    };
+    setCachedData(cacheKey, result);
+    return result;
+  } catch (error) {
+    console.error("Failed to fetch company overview:", error);
+    return null;
+  }
+}
+
+// Fetch News Sentiment from Alpha Vantage
+async function fetchNewsSentiment(symbol: string, apiKey: string): Promise<{ items: NewsSentiment[]; overall: number } | null> {
+  const cacheKey = `news_${symbol}`;
+  const cached = getCachedData<{ items: NewsSentiment[]; overall: number }>(cacheKey, ALPHA_VANTAGE_CACHE_MS);
+  if (cached) return cached;
+
+  try {
+    const url = `${ALPHA_VANTAGE_BASE_URL}?function=NEWS_SENTIMENT&tickers=${symbol}&limit=5&apikey=${apiKey}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.Note || data.Information || !data.feed) {
+      return null;
+    }
+
+    let totalScore = 0;
+    const items: NewsSentiment[] = data.feed.slice(0, 3).map((item: Record<string, unknown>) => {
+      const tickerSentiment = (item.ticker_sentiment as Array<{ ticker: string; ticker_sentiment_score: string; ticker_sentiment_label: string }>) || [];
+      const symbolSentiment = tickerSentiment.find(t => t.ticker === symbol);
+      const score = parseFloat(symbolSentiment?.ticker_sentiment_score || item.overall_sentiment_score as string || "0");
+      totalScore += score;
+
+      return {
+        title: (item.title as string)?.slice(0, 80) + ((item.title as string)?.length > 80 ? "..." : ""),
+        sentiment: mapSentimentLabel(symbolSentiment?.ticker_sentiment_label || item.overall_sentiment_label as string || "Neutral"),
+        score,
+        source: item.source as string,
+        timeAgo: formatTimeAgo(item.time_published as string),
+      };
+    });
+
+    const result = { items, overall: items.length > 0 ? totalScore / items.length : 0 };
+    setCachedData(cacheKey, result);
+    return result;
+  } catch (error) {
+    console.error("Failed to fetch news sentiment:", error);
+    return null;
+  }
+}
+
+function mapSentimentLabel(label: string): string {
+  const lower = label.toLowerCase();
+  if (lower.includes("bullish")) return "Bullish";
+  if (lower.includes("bearish")) return "Bearish";
+  return "Neutral";
+}
+
+function formatMarketCap(value: string): string {
+  const num = parseFloat(value);
+  if (isNaN(num)) return "N/A";
+  if (num >= 1e12) return `$${(num / 1e12).toFixed(2)}T`;
+  if (num >= 1e9) return `$${(num / 1e9).toFixed(2)}B`;
+  if (num >= 1e6) return `$${(num / 1e6).toFixed(2)}M`;
+  return `$${num.toLocaleString()}`;
+}
+
+function formatTimeAgo(dateString: string): string {
+  const year = dateString.slice(0, 4);
+  const month = dateString.slice(4, 6);
+  const day = dateString.slice(6, 8);
+  const hour = dateString.slice(9, 11);
+  const minute = dateString.slice(11, 13);
+
+  const date = new Date(`${year}-${month}-${day}T${hour}:${minute}:00Z`);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${diffDays}d ago`;
+}
+
+function formatVolume(volume: number): string {
+  if (volume >= 1_000_000_000) return (volume / 1_000_000_000).toFixed(2) + "B";
+  if (volume >= 1_000_000) return (volume / 1_000_000).toFixed(2) + "M";
+  if (volume >= 1_000) return (volume / 1_000).toFixed(2) + "K";
+  return volume.toString();
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    const openRouterKey = process.env.OPENROUTER_API_KEY;
+    const alphaVantageKey = process.env.ALPHA_VANTAGE_API_KEY;
 
-    if (!apiKey) {
+    if (!openRouterKey) {
       return NextResponse.json(
         { error: "API key not configured", message: "OpenRouter API key is not set" },
         { status: 500 }
@@ -65,7 +301,6 @@ export async function POST(request: NextRequest) {
 
     const body: AIRequestBody = await request.json();
 
-    // Validate symbol
     const symbol = validateSymbol(body.symbol);
     if (!symbol) {
       return NextResponse.json(
@@ -75,8 +310,6 @@ export async function POST(request: NextRequest) {
     }
 
     const { stockData, forceRefresh, model } = body;
-
-    // Default to Gemini 2.5 Flash if no model specified
     const selectedModel = model || "google/gemini-2.5-flash";
 
     // Check cache (unless force refresh is requested)
@@ -86,7 +319,6 @@ export async function POST(request: NextRequest) {
         const now = Date.now();
         const age = now - cached.timestamp;
 
-        // Return cached if within 1 hour
         if (age < CACHE_DURATION_MS) {
           const cachedAt = new Date(cached.timestamp);
           return NextResponse.json({
@@ -94,13 +326,32 @@ export async function POST(request: NextRequest) {
             model: selectedModel,
             cached: true,
             cachedAt: cachedAt.toISOString(),
-            expiresIn: Math.round((CACHE_DURATION_MS - age) / 1000 / 60), // minutes remaining
+            expiresIn: Math.round((CACHE_DURATION_MS - age) / 1000 / 60),
           });
         }
       }
     }
 
-    // Get today's date for context
+    // Fetch Alpha Vantage data in parallel (if API key is available)
+    let rsiData: RSIData | null = null;
+    let macdData: MACDData | null = null;
+    let overview: CompanyOverview | null = null;
+    let newsSentiment: { items: NewsSentiment[]; overall: number } | null = null;
+
+    if (alphaVantageKey) {
+      const results = await Promise.allSettled([
+        fetchRSI(symbol, alphaVantageKey),
+        fetchMACD(symbol, alphaVantageKey),
+        fetchCompanyOverview(symbol, alphaVantageKey),
+        fetchNewsSentiment(symbol, alphaVantageKey),
+      ]);
+
+      rsiData = results[0].status === "fulfilled" ? results[0].value : null;
+      macdData = results[1].status === "fulfilled" ? results[1].value : null;
+      overview = results[2].status === "fulfilled" ? results[2].value : null;
+      newsSentiment = results[3].status === "fulfilled" ? results[3].value : null;
+    }
+
     const today = new Date().toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
@@ -108,58 +359,86 @@ export async function POST(request: NextRequest) {
       day: 'numeric'
     });
 
-    // Create the analysis prompt - requesting JSON format
-    const systemPrompt = `You are an expert financial analyst and market predictor with access to current market data. Today is ${today}.
+    // Build enhanced prompt with Alpha Vantage data
+    let technicalSection = "";
+    if (rsiData || macdData) {
+      technicalSection = "\n\n=== TECHNICAL INDICATORS (Real-time from Alpha Vantage) ===";
+      if (rsiData) {
+        technicalSection += `\nRSI (14-day): ${rsiData.value.toFixed(2)} (${rsiData.signal})`;
+      }
+      if (macdData) {
+        technicalSection += `\nMACD: ${macdData.macd.toFixed(4)}, Signal: ${macdData.signal.toFixed(4)}, Histogram: ${macdData.histogram.toFixed(4)} (${macdData.trend})`;
+      }
+    }
 
-IMPORTANT: Base your analysis on:
-1. CURRENT real-time price data provided
-2. RECENT news and events affecting this stock (last 24-48 hours)
-3. Current market sentiment and sector trends
-4. Recent earnings reports, analyst ratings, and institutional activity
-5. Technical indicators and price patterns
+    let fundamentalsSection = "";
+    if (overview) {
+      fundamentalsSection = `\n\n=== FUNDAMENTALS ===
+Market Cap: ${overview.marketCap}
+P/E Ratio: ${overview.peRatio}
+EPS: $${overview.eps}
+52-Week High: $${overview.fiftyTwoWeekHigh}
+52-Week Low: $${overview.fiftyTwoWeekLow}
+Dividend Yield: ${overview.dividendYield}
+Sector: ${overview.sector}
+Industry: ${overview.industry}`;
+    }
 
-Analyze stocks using the provided current data AND your knowledge of recent market news/events to provide actionable investment predictions. Respond ONLY with valid JSON in this exact format:
+    let newsSection = "";
+    if (newsSentiment && newsSentiment.items.length > 0) {
+      newsSection = "\n\n=== RECENT NEWS SENTIMENT (Real-time) ===";
+      newsSentiment.items.forEach((item, i) => {
+        const scoreStr = item.score >= 0 ? `+${item.score.toFixed(2)}` : item.score.toFixed(2);
+        newsSection += `\n${i + 1}. [${item.sentiment} ${scoreStr}] "${item.title}" - ${item.source}, ${item.timeAgo}`;
+      });
+      const overallStr = newsSentiment.overall >= 0 ? `+${newsSentiment.overall.toFixed(2)}` : newsSentiment.overall.toFixed(2);
+      const overallLabel = newsSentiment.overall > 0.15 ? "Bullish" : newsSentiment.overall < -0.15 ? "Bearish" : "Neutral";
+      newsSection += `\nOverall News Sentiment: ${overallLabel} (${overallStr})`;
+    }
+
+    const systemPrompt = `You are an expert financial analyst and market predictor with access to REAL-TIME market data. Today is ${today}.
+
+IMPORTANT: You are provided with REAL technical indicators, fundamentals, and news sentiment from Alpha Vantage. Use this DATA-DRIVEN analysis:
+
+1. RSI: >70 = overbought (potential reversal down), <30 = oversold (potential reversal up)
+2. MACD: Positive histogram + MACD above signal = bullish momentum
+3. P/E Ratio: Compare to sector average for valuation
+4. News Sentiment: Scores range from -1 (very bearish) to +1 (very bullish)
+
+Analyze using the PROVIDED DATA to give actionable investment predictions. Respond ONLY with valid JSON:
 
 {
   "score": <number 1-10>,
   "prediction": "<UP or DOWN>",
   "confidence": <number 1-100>,
-  "reasons": ["<short bullet 1>", "<short bullet 2>", "<short bullet 3>"],
+  "reasons": ["<bullet 1>", "<bullet 2>", "<bullet 3>"],
   "bottomFishing": {
     "recommended": <boolean>,
-    "targetPrice": <number - ALWAYS provide a specific price, use current price minus 3-10% as entry target>,
-    "timing": "<description of when to buy, e.g., 'Now', 'Wait for pullback to $XX', 'Within 1-2 weeks'>",
-    "rationale": "<short explanation>"
+    "targetPrice": <number>,
+    "timing": "<when to buy>",
+    "rationale": "<explanation>"
   },
   "priceTarget": {
-    "expectedRise": <percentage number>,
+    "expectedRise": <percentage>,
     "targetPrice": <number>,
-    "timeframe": "<e.g., '1-2 weeks', '1 month', '3 months'>",
-    "exitStrategy": "<when to sell, e.g., 'Sell at $XXX or if drops below $XXX'>"
+    "timeframe": "<e.g., '1-2 weeks'>",
+    "exitStrategy": "<when to sell>"
   },
   "riskFactors": ["<risk 1>", "<risk 2>", "<risk 3>"]
 }
 
 Rules:
-- score: 8-10 = Strong Buy (green), 5-7 = Hold (yellow), 1-4 = Caution (red)
-- prediction: Based on current data, recent news, and market trends, predict if this stock will go UP or DOWN in the near term
-- confidence: How confident you are in the prediction (1-100%)
-- reasons: exactly 3 SHORT bullet points (max 15 words each) - MUST reference recent news/events when relevant
-- bottomFishing: 
-  * ALWAYS provide a specific targetPrice number (never null)
-  * Calculate entry price based on current price: suggest 3-10% below current price for optimal entry
-  * If stock is in uptrend, suggest waiting for pullback to specific price level
-  * If stock is near bottom, recommend buying now or soon at current levels
-- priceTarget: Predict how much the stock will rise, target price, timeframe, and when to exit
-- riskFactors: exactly 3 SHORT bullet points about key risks including any current market concerns
-
-Be specific with numbers. Reference recent news/catalysts. Give actionable advice based on TODAY's market conditions.
+- score: 8-10 = Strong Buy, 5-7 = Hold, 1-4 = Caution
+- Use RSI/MACD signals to determine entry timing
+- Reference the actual technical indicator values in your reasons
+- Consider news sentiment when assessing short-term momentum
+- Be specific with price targets based on technical levels
 
 IMPORTANT: Return ONLY the JSON object, no markdown, no code blocks.`;
 
     const userPrompt = `Analysis Date: ${today}
 
-Analyze this stock using current market data and recent news. Provide your investment prediction with bottom fishing and exit timing:
+Analyze this stock using the provided real-time data:
 
 Stock: ${symbol} (${stockData.name})
 Current Price: $${stockData.currentPrice.toFixed(2)}
@@ -168,15 +447,15 @@ Day High: $${stockData.dayHigh.toFixed(2)}
 Day Low: $${stockData.dayLow.toFixed(2)}
 Volume: ${formatVolume(stockData.volume)}
 5-Day Sharpe Ratio: ${stockData.sharpeRatio.toFixed(2)}
-Current Trend: ${stockData.trend.charAt(0).toUpperCase() + stockData.trend.slice(1)}
+Current Trend: ${stockData.trend.charAt(0).toUpperCase() + stockData.trend.slice(1)}${technicalSection}${fundamentalsSection}${newsSection}
 
-Consider any recent news, earnings, analyst ratings, or market events affecting ${symbol}. Provide your JSON response:`;
+Provide your JSON analysis:`;
 
     const response = await fetch(OPENROUTER_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
+        "Authorization": `Bearer ${openRouterKey}`,
         "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
         "X-Title": "stocky-ahh - Stock Trend Analyzer",
       },
@@ -195,7 +474,6 @@ Consider any recent news, earnings, analyst ratings, or market events affecting 
       const errorData = await response.json().catch(() => ({}));
       console.error("OpenRouter API error:", errorData);
 
-      // Handle specific error cases
       if (response.status === 403) {
         const errorMessage = errorData?.error?.message || "";
         if (errorMessage.includes("limit exceeded")) {
@@ -226,10 +504,8 @@ Consider any recent news, earnings, analyst ratings, or market events affecting 
       );
     }
 
-    // Parse the JSON response from AI
     let parsedAnalysis;
     try {
-      // Clean up the response - remove markdown code blocks if present
       let cleanedResponse = aiResponse.trim();
       if (cleanedResponse.startsWith("```json")) {
         cleanedResponse = cleanedResponse.slice(7);
@@ -243,7 +519,6 @@ Consider any recent news, earnings, analyst ratings, or market events affecting 
 
       parsedAnalysis = JSON.parse(cleanedResponse);
 
-      // Validate the structure
       if (typeof parsedAnalysis.score !== "number" || parsedAnalysis.score < 1 || parsedAnalysis.score > 10) {
         throw new Error("Invalid score");
       }
@@ -255,7 +530,6 @@ Consider any recent news, earnings, analyst ratings, or market events affecting 
       }
     } catch {
       console.error("Failed to parse AI response:", aiResponse);
-      // Fallback response if parsing fails
       parsedAnalysis = {
         score: 5,
         prediction: "HOLD",
@@ -267,7 +541,7 @@ Consider any recent news, earnings, analyst ratings, or market events affecting 
         ],
         bottomFishing: {
           recommended: false,
-          targetPrice: stockData.currentPrice * 0.95, // 5% below current price as entry target
+          targetPrice: stockData.currentPrice * 0.95,
           timing: "Wait for pullback",
           rationale: "Consider entry at lower price levels"
         },
@@ -285,7 +559,6 @@ Consider any recent news, earnings, analyst ratings, or market events affecting 
       };
     }
 
-    // Save to cache
     analysisCache.set(symbol, {
       analysis: parsedAnalysis,
       timestamp: Date.now(),
@@ -297,6 +570,12 @@ Consider any recent news, earnings, analyst ratings, or market events affecting 
       model: data.model || selectedModel,
       usage: data.usage,
       cached: false,
+      enhancedData: {
+        hasRSI: !!rsiData,
+        hasMACD: !!macdData,
+        hasFundamentals: !!overview,
+        hasNews: !!newsSentiment,
+      },
     });
   } catch (error) {
     console.error("AI API error:", error);
@@ -305,17 +584,4 @@ Consider any recent news, earnings, analyst ratings, or market events affecting 
       { status: 500 }
     );
   }
-}
-
-function formatVolume(volume: number): string {
-  if (volume >= 1_000_000_000) {
-    return (volume / 1_000_000_000).toFixed(2) + "B";
-  }
-  if (volume >= 1_000_000) {
-    return (volume / 1_000_000).toFixed(2) + "M";
-  }
-  if (volume >= 1_000) {
-    return (volume / 1_000).toFixed(2) + "K";
-  }
-  return volume.toString();
 }
