@@ -102,7 +102,7 @@ export async function GET(
 
     const response = await fetch(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; Stockify/1.0)",
+        "User-Agent": "Mozilla/5.0 (compatible; stocky-ahh/1.0)",
       },
       next: { revalidate: 60 }, // Cache for 60 seconds
     });

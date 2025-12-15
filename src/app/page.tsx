@@ -20,7 +20,7 @@ export default function Home() {
                 <TrendingUp className="h-6 w-6 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold">Stockify</h1>
+                <h1 className="text-xl font-bold">stocky-ahh</h1>
                 <p className="text-xs text-muted-foreground hidden sm:block">Stock Trend Analyzer</p>
               </div>
             </div>
@@ -89,7 +89,7 @@ export default function Home() {
           <div className="flex flex-col gap-4">
             <div className="flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">
               <p>
-                <span className="text-foreground font-medium">Stockify</span> - Stock Trend Analyzer
+                <span className="text-foreground font-medium">stocky-ahh</span> - Stock Trend Analyzer
               </p>
               <p className="text-xs text-center md:text-right">
                 This is not financial advice. Data is provided for informational purposes only.

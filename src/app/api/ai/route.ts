@@ -79,7 +79,7 @@ Provide your JSON response:`;
         "Content-Type": "application/json",
         "Authorization": `Bearer ${apiKey}`,
         "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-        "X-Title": "Stockify - Stock Trend Analyzer",
+        "X-Title": "stocky-ahh - Stock Trend Analyzer",
       },
       body: JSON.stringify({
         model: "x-ai/grok-4",
