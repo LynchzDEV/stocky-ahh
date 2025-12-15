@@ -20,6 +20,8 @@ export interface StockData {
   ohlc: OHLCData[];
   sharpeRatio: number;
   trend: "bullish" | "bearish" | "neutral";
+  fiftyTwoWeekHigh: number;
+  fiftyTwoWeekLow: number;
 }
 
 export interface ExchangeRate {
@@ -30,4 +32,24 @@ export interface ExchangeRate {
 export interface ApiError {
   error: string;
   message: string;
+}
+
+export interface SearchHistoryItem {
+  symbol: string;
+  name: string;
+  timestamp: number;
+}
+
+export interface WatchlistItem {
+  symbol: string;
+  name: string;
+  addedAt: number;
+}
+
+export interface MarketIndex {
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  changePercent: number;
 }

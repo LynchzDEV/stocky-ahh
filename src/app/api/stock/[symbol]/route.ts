@@ -70,58 +70,6 @@ function formatDate(timestamp: number): string {
   return `${months[date.getMonth()]} ${date.getDate()}`;
 }
 
-// Generate demo data for when API fails
-function generateDemoData(symbol: string): StockData {
-  const basePrice = 150 + Math.random() * 100;
-  const ohlc: OHLCData[] = [];
-  const prices: number[] = [];
-
-  for (let i = 4; i >= 0; i--) {
-    const date = new Date();
-    date.setDate(date.getDate() - i);
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const dateStr = `${months[date.getMonth()]} ${date.getDate()}`;
-
-    const volatility = 0.02;
-    const open = basePrice * (1 + (Math.random() - 0.5) * volatility);
-    const close = open * (1 + (Math.random() - 0.5) * volatility);
-    const high = Math.max(open, close) * (1 + Math.random() * volatility);
-    const low = Math.min(open, close) * (1 - Math.random() * volatility);
-
-    ohlc.push({
-      date: dateStr,
-      open: Math.round(open * 100) / 100,
-      high: Math.round(high * 100) / 100,
-      low: Math.round(low * 100) / 100,
-      close: Math.round(close * 100) / 100,
-      volume: Math.round(1000000 + Math.random() * 5000000),
-    });
-
-    prices.push(close);
-  }
-
-  const currentPrice = prices[prices.length - 1];
-  const previousClose = prices[prices.length - 2] || currentPrice;
-  const change = currentPrice - previousClose;
-  const changePercent = (change / previousClose) * 100;
-  const sharpeRatio = calculateSharpeRatio(prices);
-
-  return {
-    symbol: symbol.toUpperCase(),
-    name: `${symbol.toUpperCase()} Inc. (Demo)`,
-    currentPrice: Math.round(currentPrice * 100) / 100,
-    previousClose: Math.round(previousClose * 100) / 100,
-    change: Math.round(change * 100) / 100,
-    changePercent: Math.round(changePercent * 100) / 100,
-    dayHigh: Math.round(ohlc[ohlc.length - 1].high * 100) / 100,
-    dayLow: Math.round(ohlc[ohlc.length - 1].low * 100) / 100,
-    volume: ohlc[ohlc.length - 1].volume,
-    ohlc,
-    sharpeRatio,
-    trend: determineTrend(sharpeRatio),
-  };
-}
-
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ symbol: string }> }
@@ -160,17 +108,22 @@ export async function GET(
     });
 
     if (!response.ok) {
-      // Return demo data if Yahoo API fails
-      console.log(`Yahoo API returned ${response.status}, using demo data`);
-      return NextResponse.json(generateDemoData(symbol));
+      console.log(`Yahoo API returned ${response.status} for symbol: ${symbol}`);
+      return NextResponse.json(
+        { error: "Stock not found", message: `Unable to find stock data for "${symbol}"` },
+        { status: 404 }
+      );
     }
 
     const data = await response.json();
 
     // Validate response structure
     if (!validateYahooResponse(data)) {
-      console.log("Invalid Yahoo response structure, using demo data");
-      return NextResponse.json(generateDemoData(symbol));
+      console.log(`Invalid Yahoo response structure for symbol: ${symbol}`);
+      return NextResponse.json(
+        { error: "Stock not found", message: `Unable to find stock data for "${symbol}"` },
+        { status: 404 }
+      );
     }
 
     const result = data.chart.result[0];
@@ -203,7 +156,10 @@ export async function GET(
     }
 
     if (ohlc.length === 0) {
-      return NextResponse.json(generateDemoData(symbol));
+      return NextResponse.json(
+        { error: "No data available", message: `No price data available for "${symbol}"` },
+        { status: 404 }
+      );
     }
 
     const currentPrice = meta.regularMarketPrice || closePrices[closePrices.length - 1];
@@ -225,14 +181,16 @@ export async function GET(
       ohlc,
       sharpeRatio,
       trend: determineTrend(sharpeRatio),
+      fiftyTwoWeekHigh: Math.round((meta.fiftyTwoWeekHigh || currentPrice) * 100) / 100,
+      fiftyTwoWeekLow: Math.round((meta.fiftyTwoWeekLow || currentPrice) * 100) / 100,
     };
 
     return NextResponse.json(stockData);
   } catch (error) {
     console.error("Stock API error:", error);
-    // Return demo data on error
-    const { symbol: rawSymbol } = await params;
-    const symbol = validateSymbol(rawSymbol) || "DEMO";
-    return NextResponse.json(generateDemoData(symbol));
+    return NextResponse.json(
+      { error: "Server error", message: "Failed to fetch stock data. Please try again later." },
+      { status: 500 }
+    );
   }
 }

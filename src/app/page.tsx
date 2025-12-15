@@ -5,21 +5,32 @@ import { BarChart3, ArrowRightLeft, TrendingUp } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StockAnalyzer } from "@/components/features/stock-analyzer";
 import { CurrencyConverter } from "@/components/features/currency-converter";
+import { MarketStatus } from "@/components/features/market-status";
+import { MarketOverview } from "@/components/features/market-overview";
 
 export default function Home() {
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
       <header className="border-b border-border/50 bg-card/30 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-gradient-to-br from-[#3b82f6] to-[#8b5cf6]">
-              <TrendingUp className="h-6 w-6 text-white" />
+        <div className="container mx-auto px-4 py-3">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-gradient-to-br from-[#3b82f6] to-[#8b5cf6]">
+                <TrendingUp className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold">Stockify</h1>
+                <p className="text-xs text-muted-foreground hidden sm:block">Stock Trend Analyzer</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl font-bold">Stockify</h1>
-              <p className="text-xs text-muted-foreground">Stock Trend Analyzer</p>
-            </div>
+            <MarketStatus />
+          </div>
+        </div>
+        {/* Market Overview Ticker */}
+        <div className="border-t border-border/30 bg-background/50">
+          <div className="container mx-auto px-4 py-2">
+            <MarketOverview />
           </div>
         </div>
       </header>
