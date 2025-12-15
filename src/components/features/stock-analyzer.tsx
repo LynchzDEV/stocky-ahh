@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, TrendingUp, TrendingDown, Minus, Info, BarChart3, Lightbulb, Sparkles, X, Star, History, Trash2 } from "lucide-react";
+import { Search, TrendingUp, TrendingDown, Minus, Info, BarChart3, Lightbulb, Sparkles, X, Star, History, Trash2, Target, Clock, AlertTriangle, DollarSign, ArrowUpCircle, ArrowDownCircle, Anchor, RefreshCw, ChevronDown, Check } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,10 +13,32 @@ import type { StockData } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { useSearchHistory } from "@/hooks/use-search-history";
 import { useWatchlist } from "@/hooks/use-watchlist";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+// AI Model configurations
+const AI_MODELS = [
+  { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "Google", badge: "Default" },
+  { id: "openai/gpt-oss-120b", name: "GPT-OSS 120B", provider: "OpenAI" },
+  { id: "x-ai/grok-4.1-fast", name: "Grok 4.1 Fast", provider: "xAI" },
+  { id: "qwen/qwen3-vl-8b-instruct", name: "Qwen3 VL 8B", provider: "Qwen" },
+  { id: "openai/gpt-5-mini", name: "GPT-5 Mini", provider: "OpenAI" },
+  { id: "qwen/qwen3-32b", name: "Qwen3 32B", provider: "Qwen" },
+  { id: "openai/gpt-4.1-nano", name: "GPT-4.1 Nano", provider: "OpenAI" },
+  { id: "deepseek/deepseek-chat-v3.1", name: "DeepSeek V3.1", provider: "DeepSeek" },
+  { id: "google/gemini-3-pro-preview", name: "Gemini 3 Pro", provider: "Google" },
+];
 
 const POPULAR_STOCKS = ["AAPL", "GOOGL", "TSLA", "MSFT", "AMZN", "NVDA"];
 
 const rateLimiter = new RateLimiter(1000);
+
 
 function formatVolume(volume: number): string {
   if (volume >= 1_000_000_000) {
@@ -78,11 +100,31 @@ export function StockAnalyzer() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState<{
     score: number;
+    prediction: string;
+    confidence: number;
     reasons: string[];
-    factors: string[];
+    bottomFishing: {
+      recommended: boolean;
+      targetPrice: number | null;
+      timing: string;
+      rationale: string;
+    };
+    priceTarget: {
+      expectedRise: number;
+      targetPrice: number;
+      timeframe: string;
+      exitStrategy: string;
+    };
+    riskFactors: string[];
   } | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [showAiPanel, setShowAiPanel] = useState(false);
+  const [aiCacheInfo, setAiCacheInfo] = useState<{
+    cached: boolean;
+    cachedAt?: string;
+    expiresIn?: number;
+  } | null>(null);
+  const [selectedModel, setSelectedModel] = useState(AI_MODELS[0]); // Default to Gemini 2.5 Flash
 
   // Get score color based on value
   const getScoreColor = (score: number) => {
@@ -91,7 +133,7 @@ export function StockAnalyzer() {
     return { bg: "bg-red-500", text: "text-red-500", label: "Caution" };
   };
 
-  const fetchAiAnalysis = useCallback(async () => {
+  const fetchAiAnalysis = useCallback(async (forceRefresh = false) => {
     if (!stockData) return;
 
     setAiLoading(true);
@@ -106,6 +148,8 @@ export function StockAnalyzer() {
         },
         body: JSON.stringify({
           symbol: stockData.symbol,
+          forceRefresh,
+          model: selectedModel.id,
           stockData: {
             name: stockData.name,
             currentPrice: stockData.currentPrice,
@@ -127,12 +171,17 @@ export function StockAnalyzer() {
 
       const data = await response.json();
       setAiAnalysis(data.analysis);
+      setAiCacheInfo({
+        cached: data.cached || false,
+        cachedAt: data.cachedAt,
+        expiresIn: data.expiresIn,
+      });
     } catch (err) {
       setAiError(err instanceof Error ? err.message : "Unable to get AI analysis");
     } finally {
       setAiLoading(false);
     }
-  }, [stockData]);
+  }, [stockData, selectedModel]);
 
   const fetchStockData = useCallback(async (searchSymbol: string) => {
     const validSymbol = validateSymbol(searchSymbol);
@@ -331,50 +380,93 @@ export function StockAnalyzer() {
                             ? removeFromWatchlist(stockData.symbol)
                             : addToWatchlist(stockData.symbol, stockData.name)
                         }
-                        className={`h-8 w-8 ${
-                          isInWatchlist(stockData.symbol)
-                            ? "text-yellow-500 hover:text-yellow-600"
-                            : "text-muted-foreground hover:text-yellow-500"
-                        }`}
+                        className={`h-8 w-8 ${isInWatchlist(stockData.symbol)
+                          ? "text-yellow-500 hover:text-yellow-600"
+                          : "text-muted-foreground hover:text-yellow-500"
+                          }`}
                       >
                         <Star className={`h-5 w-5 ${isInWatchlist(stockData.symbol) ? "fill-current" : ""}`} />
                       </Button>
                       <Badge
                         variant="outline"
-                        className={`${
-                          stockData.trend === "bullish"
-                            ? "border-[#22c55e] text-[#22c55e]"
-                            : stockData.trend === "bearish"
+                        className={`${stockData.trend === "bullish"
+                          ? "border-[#22c55e] text-[#22c55e]"
+                          : stockData.trend === "bearish"
                             ? "border-[#ef4444] text-[#ef4444]"
                             : "border-[#eab308] text-[#eab308]"
-                        }`}
+                          }`}
                       >
                         <TrendIcon className="h-3 w-3 mr-1" />
                         {stockData.trend.charAt(0).toUpperCase() + stockData.trend.slice(1)}
                       </Badge>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={fetchAiAnalysis}
-                        disabled={aiLoading}
-                        className="ml-2 gap-1.5 bg-gradient-to-r from-amber-500/10 to-yellow-500/10 border-amber-500/30 hover:border-amber-500/50 hover:bg-amber-500/20 text-amber-500"
-                      >
-                        {aiLoading ? (
-                          <Spinner size="sm" className="text-amber-500" />
-                        ) : (
-                          <Lightbulb className="h-4 w-4" />
-                        )}
-                        <span className="hidden sm:inline">AI Insight</span>
-                      </Button>
+
+                      {/* AI Model Selector + Insight Button */}
+                      <div className="flex items-center gap-1 ml-2">
+                        {/* Model Dropdown using shadcn */}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-xs gap-1 border-amber-500/30 text-amber-500 hover:bg-amber-500/10 pr-2"
+                            >
+                              <span className="hidden sm:inline max-w-[100px] truncate">{selectedModel.name}</span>
+                              <span className="sm:hidden">{selectedModel.provider}</span>
+                              <ChevronDown className="h-3 w-3" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-56">
+                            <DropdownMenuLabel>Select AI Model</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            {AI_MODELS.map((model) => (
+                              <DropdownMenuItem
+                                key={model.id}
+                                onClick={() => setSelectedModel(model)}
+                                className="flex items-center justify-between cursor-pointer"
+                              >
+                                <div>
+                                  <p className="font-medium">{model.name}</p>
+                                  <p className="text-xs text-muted-foreground">{model.provider}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {model.badge && (
+                                    <Badge variant="outline" className="text-[10px] border-green-500/30 text-green-500">
+                                      {model.badge}
+                                    </Badge>
+                                  )}
+                                  {selectedModel.id === model.id && (
+                                    <Check className="h-4 w-4 text-amber-500" />
+                                  )}
+                                </div>
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+
+                        {/* AI Insight Button */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => fetchAiAnalysis()}
+                          disabled={aiLoading}
+                          className="gap-1.5 bg-gradient-to-r from-amber-500/10 to-yellow-500/10 border-amber-500/30 hover:border-amber-500/50 hover:bg-amber-500/20 text-amber-500"
+                        >
+                          {aiLoading ? (
+                            <Spinner size="sm" className="text-amber-500" />
+                          ) : (
+                            <Lightbulb className="h-4 w-4" />
+                          )}
+                          <span className="hidden sm:inline">AI Insight</span>
+                        </Button>
+                      </div>
                     </div>
                     <p className="text-muted-foreground text-sm mt-1">{stockData.name}</p>
                   </div>
                   <div className="text-right">
                     <p className="text-3xl font-bold font-mono">${stockData.currentPrice.toFixed(2)}</p>
                     <p
-                      className={`text-sm font-mono ${
-                        stockData.change >= 0 ? "text-[#22c55e]" : "text-[#ef4444]"
-                      }`}
+                      className={`text-sm font-mono ${stockData.change >= 0 ? "text-[#22c55e]" : "text-[#ef4444]"
+                        }`}
                     >
                       {stockData.change >= 0 ? "+" : ""}
                       {stockData.change.toFixed(2)} ({stockData.changePercent >= 0 ? "+" : ""}
@@ -395,22 +487,46 @@ export function StockAnalyzer() {
                 >
                   <Card className="bg-gradient-to-br from-amber-500/5 to-yellow-500/5 border-amber-500/30">
                     <CardHeader className="pb-3">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="flex items-center gap-2 text-lg">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <CardTitle className="flex items-center gap-2 text-lg flex-wrap">
                           <Sparkles className="h-5 w-5 text-amber-500" />
-                          AI Investment Analysis
+                          <span className="hidden sm:inline">AI Investment Analysis</span>
+                          <span className="sm:hidden">AI Analysis</span>
+
+                          {/* Show selected model as badge */}
                           <Badge variant="outline" className="text-xs border-amber-500/30 text-amber-500">
-                            Grok-4
+                            {selectedModel.name}
                           </Badge>
+
+                          {aiCacheInfo?.cached && (
+                            <Badge variant="outline" className="text-xs border-blue-500/30 text-blue-500">
+                              <Clock className="h-3 w-3 mr-1" />
+                              Cached ({aiCacheInfo.expiresIn}m left)
+                            </Badge>
+                          )}
                         </CardTitle>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setShowAiPanel(false)}
-                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          {aiAnalysis && !aiLoading && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => fetchAiAnalysis(true)}
+                              disabled={aiLoading}
+                              className="h-8 text-xs gap-1.5 border-blue-500/30 hover:border-blue-500/50 hover:bg-blue-500/10 text-blue-500"
+                            >
+                              <RefreshCw className="h-3.5 w-3.5" />
+                              Recalculate
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setShowAiPanel(false)}
+                            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent>
@@ -428,31 +544,63 @@ export function StockAnalyzer() {
                         </div>
                       )}
                       {aiAnalysis && !aiLoading && (
-                        <div className="space-y-5">
-                          {/* Score */}
-                          <div className="flex items-center gap-4">
-                            <div className={`relative flex items-center justify-center w-20 h-20 rounded-full ${getScoreColor(aiAnalysis.score).bg}/20 border-2 ${getScoreColor(aiAnalysis.score).text.replace('text-', 'border-')}`}>
-                              <span className={`text-3xl font-bold font-mono ${getScoreColor(aiAnalysis.score).text}`}>
-                                {aiAnalysis.score}
-                              </span>
-                              <span className={`absolute -bottom-1 text-xs font-medium ${getScoreColor(aiAnalysis.score).text}`}>/10</span>
+                        <div className="space-y-6">
+                          {/* Score and Prediction Header */}
+                          <div className="flex items-center justify-between gap-4 flex-wrap">
+                            {/* Score Circle */}
+                            <div className="flex items-center gap-4">
+                              <div className={`relative flex items-center justify-center w-20 h-20 rounded-full ${getScoreColor(aiAnalysis.score).bg}/20 border-2 ${getScoreColor(aiAnalysis.score).text.replace('text-', 'border-')}`}>
+                                <span className={`text-3xl font-bold font-mono ${getScoreColor(aiAnalysis.score).text}`}>
+                                  {aiAnalysis.score}
+                                </span>
+                                <span className={`absolute -bottom-1 text-xs font-medium ${getScoreColor(aiAnalysis.score).text}`}>/10</span>
+                              </div>
+                              <div>
+                                <p className="text-sm text-muted-foreground">Investment Score</p>
+                                <p className={`text-lg font-semibold ${getScoreColor(aiAnalysis.score).text}`}>
+                                  {getScoreColor(aiAnalysis.score).label}
+                                </p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="text-sm text-muted-foreground">Investment Score</p>
-                              <p className={`text-lg font-semibold ${getScoreColor(aiAnalysis.score).text}`}>
-                                {getScoreColor(aiAnalysis.score).label}
+
+                            {/* Prediction Badge */}
+                            <div className="flex flex-col items-end gap-1">
+                              <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${aiAnalysis.prediction === "UP"
+                                ? "bg-green-500/10 border border-green-500/30"
+                                : aiAnalysis.prediction === "DOWN"
+                                  ? "bg-red-500/10 border border-red-500/30"
+                                  : "bg-yellow-500/10 border border-yellow-500/30"
+                                }`}>
+                                {aiAnalysis.prediction === "UP" ? (
+                                  <ArrowUpCircle className="h-5 w-5 text-green-500" />
+                                ) : aiAnalysis.prediction === "DOWN" ? (
+                                  <ArrowDownCircle className="h-5 w-5 text-red-500" />
+                                ) : (
+                                  <Minus className="h-5 w-5 text-yellow-500" />
+                                )}
+                                <span className={`text-lg font-bold ${aiAnalysis.prediction === "UP"
+                                  ? "text-green-500"
+                                  : aiAnalysis.prediction === "DOWN"
+                                    ? "text-red-500"
+                                    : "text-yellow-500"
+                                  }`}>
+                                  {aiAnalysis.prediction}
+                                </span>
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                Confidence: <span className="font-mono font-medium">{aiAnalysis.confidence}%</span>
                               </p>
                             </div>
                           </div>
 
-                          {/* Reasons */}
+                          {/* Analysis Reasons */}
                           <div className="space-y-2">
                             <div className="flex items-center gap-2">
                               <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
                               <p className="text-sm font-medium text-foreground">Analysis & Reasoning</p>
                             </div>
                             <ul className="space-y-1.5 pl-4">
-                              {aiAnalysis.reasons.map((reason, index) => (
+                              {aiAnalysis.reasons.map((reason: string, index: number) => (
                                 <li key={index} className="text-sm text-foreground/80 flex items-start gap-2">
                                   <span className="text-amber-500 mt-1">•</span>
                                   <span>{reason}</span>
@@ -461,16 +609,83 @@ export function StockAnalyzer() {
                             </ul>
                           </div>
 
-                          {/* Factors */}
+                          {/* Bottom Fishing Section */}
+                          <div className={`p-4 rounded-lg border ${aiAnalysis.bottomFishing.recommended
+                            ? "bg-cyan-500/5 border-cyan-500/30"
+                            : "bg-muted/20 border-border/30"
+                            }`}>
+                            <div className="flex items-center gap-2 mb-3">
+                              <Anchor className={`h-4 w-4 ${aiAnalysis.bottomFishing.recommended ? "text-cyan-500" : "text-muted-foreground"}`} />
+                              <p className="text-sm font-medium text-foreground">Bottom Fishing Strategy</p>
+                              {aiAnalysis.bottomFishing.recommended && (
+                                <Badge variant="outline" className="text-xs border-cyan-500/50 text-cyan-500">
+                                  Recommended
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="flex items-center gap-2">
+                                <Target className="h-4 w-4 text-muted-foreground" />
+                                <span className="text-xs text-muted-foreground">Entry Price:</span>
+                                <span className="text-sm font-mono font-medium text-foreground">
+                                  {aiAnalysis.bottomFishing.targetPrice
+                                    ? `$${aiAnalysis.bottomFishing.targetPrice.toFixed(2)}`
+                                    : "N/A"}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Clock className="h-4 w-4 text-muted-foreground" />
+                                <span className="text-xs text-muted-foreground">Timing:</span>
+                                <span className="text-sm font-medium text-foreground">{aiAnalysis.bottomFishing.timing}</span>
+                              </div>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-2 italic">{aiAnalysis.bottomFishing.rationale}</p>
+                          </div>
+
+                          {/* Price Target Section */}
+                          <div className="p-4 rounded-lg bg-green-500/5 border border-green-500/30">
+                            <div className="flex items-center gap-2 mb-3">
+                              <DollarSign className="h-4 w-4 text-green-500" />
+                              <p className="text-sm font-medium text-foreground">Price Target & Exit Strategy</p>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                              <div className="text-center p-3 rounded-lg bg-green-500/10">
+                                <p className="text-xs text-muted-foreground mb-1">Expected Rise</p>
+                                <p className="text-lg font-bold font-mono text-green-500">
+                                  +{aiAnalysis.priceTarget.expectedRise.toFixed(1)}%
+                                </p>
+                              </div>
+                              <div className="text-center p-3 rounded-lg bg-green-500/10">
+                                <p className="text-xs text-muted-foreground mb-1">Target Price</p>
+                                <p className="text-lg font-bold font-mono text-green-500">
+                                  ${aiAnalysis.priceTarget.targetPrice.toFixed(2)}
+                                </p>
+                              </div>
+                              <div className="text-center p-3 rounded-lg bg-green-500/10">
+                                <p className="text-xs text-muted-foreground mb-1">Timeframe</p>
+                                <p className="text-sm font-semibold text-foreground">
+                                  {aiAnalysis.priceTarget.timeframe}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-start gap-2 p-2 rounded bg-amber-500/10 border border-amber-500/20">
+                              <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                              <p className="text-xs text-foreground/80">
+                                <span className="font-medium">Exit Strategy:</span> {aiAnalysis.priceTarget.exitStrategy}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Risk Factors */}
                           <div className="space-y-2">
                             <div className="flex items-center gap-2">
-                              <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                              <p className="text-sm font-medium text-foreground">Factors to Watch</p>
+                              <AlertTriangle className="w-4 h-4 text-red-500" />
+                              <p className="text-sm font-medium text-foreground">Risk Factors to Watch</p>
                             </div>
                             <ul className="space-y-1.5 pl-4">
-                              {aiAnalysis.factors.map((factor, index) => (
+                              {aiAnalysis.riskFactors.map((factor: string, index: number) => (
                                 <li key={index} className="text-sm text-foreground/80 flex items-start gap-2">
-                                  <span className="text-amber-500 mt-1">•</span>
+                                  <span className="text-red-500 mt-1">•</span>
                                   <span>{factor}</span>
                                 </li>
                               ))}
