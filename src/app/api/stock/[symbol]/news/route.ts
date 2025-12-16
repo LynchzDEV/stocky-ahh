@@ -2,41 +2,62 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSymbol } from "@/lib/validation";
 import type { NewsItem } from "@/lib/types";
 
-// Rate limiting map
-const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
-const RATE_LIMIT = 30;
-const RATE_WINDOW = 60000;
+const FINNHUB_BASE_URL = "https://finnhub.io/api/v1";
 
-// Cache for news data (5 minutes)
-const newsCache = new Map<string, { data: NewsItem[]; timestamp: number }>();
-const CACHE_DURATION = 5 * 60 * 1000;
+// Keyword-based sentiment analysis
+const POSITIVE_WORDS = [
+  "surge", "surges", "surging", "soar", "soars", "soaring",
+  "jump", "jumps", "jumping", "rise", "rises", "rising",
+  "gain", "gains", "gaining", "beat", "beats", "beating",
+  "upgrade", "upgraded", "bullish", "rally", "rallies",
+  "record", "high", "profit", "profits", "growth",
+  "strong", "strength", "positive", "boost", "boosts",
+  "breakthrough", "success", "win", "wins", "winning",
+  "outperform", "buy", "optimistic", "recovery", "boom"
+];
 
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now();
-  const entry = rateLimitMap.get(ip);
+const NEGATIVE_WORDS = [
+  "fall", "falls", "falling", "drop", "drops", "dropping",
+  "plunge", "plunges", "plunging", "decline", "declines",
+  "lose", "loses", "losing", "loss", "losses", "miss", "misses",
+  "downgrade", "downgraded", "bearish", "crash", "crashes",
+  "low", "weak", "weakness", "negative", "concern", "concerns",
+  "fear", "fears", "warning", "risk", "risks", "cut", "cuts",
+  "layoff", "layoffs", "lawsuit", "investigation", "fraud",
+  "underperform", "sell", "pessimistic", "recession", "slump"
+];
 
-  if (!entry || now > entry.resetTime) {
-    rateLimitMap.set(ip, { count: 1, resetTime: now + RATE_WINDOW });
-    return true;
+function analyzeSentiment(text: string): { sentiment: "Bullish" | "Bearish" | "Neutral"; score: number } {
+  const lowerText = text.toLowerCase();
+
+  let positiveCount = 0;
+  let negativeCount = 0;
+
+  for (const word of POSITIVE_WORDS) {
+    if (lowerText.includes(word)) positiveCount++;
   }
 
-  if (entry.count >= RATE_LIMIT) {
-    return false;
+  for (const word of NEGATIVE_WORDS) {
+    if (lowerText.includes(word)) negativeCount++;
   }
 
-  entry.count++;
-  return true;
+  const score = (positiveCount - negativeCount) / Math.max(positiveCount + negativeCount, 1);
+
+  if (positiveCount > negativeCount && positiveCount >= 1) {
+    return { sentiment: "Bullish", score: Math.min(score, 1) };
+  } else if (negativeCount > positiveCount && negativeCount >= 1) {
+    return { sentiment: "Bearish", score: Math.max(score, -1) };
+  }
+
+  return { sentiment: "Neutral", score: 0 };
 }
 
-function formatTimeAgo(dateString: string): string {
-  // Alpha Vantage format: "20231215T143000"
-  const year = dateString.slice(0, 4);
-  const month = dateString.slice(4, 6);
-  const day = dateString.slice(6, 8);
-  const hour = dateString.slice(9, 11);
-  const minute = dateString.slice(11, 13);
+// Cache for news data (10 minutes - Finnhub has generous limits)
+const newsCache = new Map<string, { data: NewsItem[]; timestamp: number }>();
+const CACHE_DURATION = 10 * 60 * 1000;
 
-  const date = new Date(`${year}-${month}-${day}T${hour}:${minute}:00Z`);
+function formatTimeAgo(timestamp: number): string {
+  const date = new Date(timestamp * 1000);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
@@ -54,14 +75,15 @@ function formatTimeAgo(dateString: string): string {
   }
 }
 
-function mapSentiment(label: string): "Bullish" | "Bearish" | "Neutral" {
-  const lower = label.toLowerCase();
-  if (lower.includes("bullish") || lower.includes("positive")) {
-    return "Bullish";
-  } else if (lower.includes("bearish") || lower.includes("negative")) {
-    return "Bearish";
-  }
-  return "Neutral";
+function getDateRange(): { from: string; to: string } {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 7); // Last 7 days of news
+
+  return {
+    from: from.toISOString().split("T")[0],
+    to: to.toISOString().split("T")[0],
+  };
 }
 
 export async function GET(
@@ -69,16 +91,6 @@ export async function GET(
   { params }: { params: Promise<{ symbol: string }> }
 ) {
   try {
-    const forwarded = request.headers.get("x-forwarded-for");
-    const ip = forwarded ? forwarded.split(",")[0] : "unknown";
-
-    if (!checkRateLimit(ip)) {
-      return NextResponse.json(
-        { error: "Rate limit exceeded", message: "Please wait before making another request" },
-        { status: 429 }
-      );
-    }
-
     const { symbol: rawSymbol } = await params;
     const symbol = validateSymbol(rawSymbol);
 
@@ -95,26 +107,35 @@ export async function GET(
       return NextResponse.json({ news: cached.data, cached: true });
     }
 
-    const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
+    const apiKey = process.env.FINNHUB_API_KEY;
 
     if (!apiKey) {
       return NextResponse.json(
-        { error: "API key not configured", message: "Alpha Vantage API key is not set" },
+        { error: "API key not configured", message: "Finnhub API key is not set" },
         { status: 500 }
       );
     }
 
-    const url = `https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers=${encodeURIComponent(symbol)}&limit=10&apikey=${apiKey}`;
+    const { from, to } = getDateRange();
+    const url = `${FINNHUB_BASE_URL}/company-news?symbol=${encodeURIComponent(symbol)}&from=${from}&to=${to}&token=${apiKey}`;
 
     const response = await fetch(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; stocky-ahh/1.0)",
+        "Content-Type": "application/json",
       },
-      next: { revalidate: 300 },
+      next: { revalidate: 600 }, // 10 minutes
     });
 
     if (!response.ok) {
-      console.error(`Alpha Vantage API returned ${response.status} for symbol: ${symbol}`);
+      console.error(`Finnhub API returned ${response.status} for symbol: ${symbol}`);
+
+      if (response.status === 429) {
+        return NextResponse.json(
+          { error: "Rate limit", message: "News API rate limit reached. Please try again later." },
+          { status: 429 }
+        );
+      }
+
       return NextResponse.json(
         { error: "News fetch failed", message: "Unable to fetch news data" },
         { status: response.status }
@@ -123,48 +144,35 @@ export async function GET(
 
     const data = await response.json();
 
-    // Check for API error responses
-    if (data.Note || data.Information) {
-      console.error("Alpha Vantage API limit:", data.Note || data.Information);
-      return NextResponse.json(
-        { error: "API limit", message: "News API rate limit reached. Please try again later." },
-        { status: 429 }
-      );
-    }
-
-    if (!data.feed || !Array.isArray(data.feed)) {
+    if (!Array.isArray(data)) {
       return NextResponse.json({ news: [], cached: false });
     }
 
-    // Transform Alpha Vantage response to our NewsItem format
-    const newsItems: NewsItem[] = data.feed
-      .filter((item: Record<string, unknown>) => {
-        // Filter to only include news that mentions our symbol with decent relevance
-        const tickerSentiment = item.ticker_sentiment as Array<{ ticker: string; relevance_score: string }> | undefined;
-        if (!tickerSentiment) return true;
-        const relevant = tickerSentiment.find(
-          (t) => t.ticker === symbol && parseFloat(t.relevance_score) > 0.1
-        );
-        return relevant !== undefined;
-      })
+    // Transform Finnhub response to our NewsItem format
+    const newsItems: NewsItem[] = data
       .slice(0, 10)
-      .map((item: Record<string, unknown>) => {
-        const tickerSentiment = item.ticker_sentiment as Array<{ ticker: string; ticker_sentiment_label: string; ticker_sentiment_score: string }> | undefined;
-        const symbolSentiment = tickerSentiment?.find((t) => t.ticker === symbol);
+      .map((item: {
+        id: number;
+        headline: string;
+        summary: string;
+        url: string;
+        source: string;
+        datetime: number;
+        image: string;
+      }) => {
+        // Analyze sentiment from headline and summary
+        const textToAnalyze = `${item.headline || ""} ${item.summary || ""}`;
+        const { sentiment, score } = analyzeSentiment(textToAnalyze);
 
         return {
-          title: item.title as string,
-          url: item.url as string,
-          summary: (item.summary as string)?.slice(0, 200) + ((item.summary as string)?.length > 200 ? "..." : ""),
-          source: item.source as string,
-          publishedAt: formatTimeAgo(item.time_published as string),
-          sentiment: mapSentiment(
-            symbolSentiment?.ticker_sentiment_label || (item.overall_sentiment_label as string) || "Neutral"
-          ),
-          sentimentScore: parseFloat(
-            symbolSentiment?.ticker_sentiment_score || (item.overall_sentiment_score as string) || "0"
-          ),
-          image: (item.banner_image as string) || undefined,
+          title: item.headline,
+          url: item.url,
+          summary: item.summary?.slice(0, 200) + (item.summary?.length > 200 ? "..." : "") || "",
+          source: item.source,
+          publishedAt: formatTimeAgo(item.datetime),
+          sentiment,
+          sentimentScore: score,
+          image: item.image || undefined,
         };
       });
 

@@ -68,12 +68,14 @@ Use `@/*` to import from `src/*` (configured in tsconfig.json).
 
 Copy `.env.example` to `.env.local`:
 - `OPENROUTER_API_KEY` - Required for AI analysis features
-- `ALPHA_VANTAGE_API_KEY` - Required for stock news feature
+- `ALPHA_VANTAGE_API_KEY` - Required for technical indicators (RSI, MACD) and AI-enhanced data
+- `FINNHUB_API_KEY` - Required for stock news (60 calls/min free tier)
 - `NEXT_PUBLIC_APP_URL` - Optional, for OpenRouter referer header
 
 ## External APIs
 
 - **Yahoo Finance**: Stock quotes via `query1.finance.yahoo.com` (60s cache)
-- **Alpha Vantage**: Stock news with sentiment via `alphavantage.co` (5min cache, 25 req/day free tier)
+- **Finnhub**: Stock news via `finnhub.io` (10min cache, 60 calls/min free tier)
+- **Alpha Vantage**: Technical indicators (RSI, MACD) and fundamentals for AI analysis (15min cache)
 - **ExchangeRate API**: `api.exchangerate-api.com` for USD/THB rates
 - **OpenRouter**: AI analysis with multiple model support

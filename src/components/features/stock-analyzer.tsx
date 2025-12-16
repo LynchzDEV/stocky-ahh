@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, TrendingUp, TrendingDown, Minus, Info, BarChart3, Lightbulb, Sparkles, X, Star, History, Trash2, Target, Clock, AlertTriangle, DollarSign, ArrowUpCircle, ArrowDownCircle, Anchor, RefreshCw, ChevronDown, Check } from "lucide-react";
+import { Search, TrendingUp, TrendingDown, Minus, Info, BarChart3, Lightbulb, Sparkles, X, Star, History, Trash2, Target, Clock, AlertTriangle, DollarSign, ArrowUpCircle, ArrowDownCircle, Anchor, RefreshCw, ChevronDown, Check, Activity } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -126,6 +126,34 @@ export function StockAnalyzer() {
     expiresIn?: number;
   } | null>(null);
   const [selectedModel, setSelectedModel] = useState(AI_MODELS[0]); // Default to Gemini 2.5 Flash
+
+  // Technical indicators state
+  const [rsiData, setRsiData] = useState<{
+    value: number;
+    signal: "Overbought" | "Bullish" | "Neutral" | "Bearish" | "Oversold";
+  } | null>(null);
+  const [rsiLoading, setRsiLoading] = useState(false);
+
+  // Fetch RSI when stock data changes
+  useEffect(() => {
+    if (stockData?.symbol) {
+      const fetchIndicators = async () => {
+        setRsiLoading(true);
+        try {
+          const response = await fetch(`/api/stock/${encodeURIComponent(stockData.symbol)}/indicators`);
+          if (response.ok) {
+            const data = await response.json();
+            setRsiData(data.rsi);
+          }
+        } catch (err) {
+          console.error("Failed to fetch indicators:", err);
+        } finally {
+          setRsiLoading(false);
+        }
+      };
+      fetchIndicators();
+    }
+  }, [stockData?.symbol]);
 
   // Get score color based on value
   const getScoreColor = (score: number) => {
@@ -703,6 +731,126 @@ export function StockAnalyzer() {
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* RSI Indicator Section */}
+            <Card className="bg-card/50 backdrop-blur border-border/50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <Activity className="h-5 w-5" />
+                  RSI (14-Day)
+                  {rsiData && (
+                    <Badge
+                      variant="outline"
+                      className={`ml-2 ${
+                        rsiData.signal === "Overbought" ? "border-red-500 text-red-500" :
+                        rsiData.signal === "Oversold" ? "border-green-500 text-green-500" :
+                        rsiData.signal === "Bullish" ? "border-green-500/70 text-green-500" :
+                        rsiData.signal === "Bearish" ? "border-red-500/70 text-red-500" :
+                        "border-yellow-500 text-yellow-500"
+                      }`}
+                    >
+                      {rsiData.signal}
+                    </Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {rsiLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Spinner size="md" />
+                  </div>
+                ) : rsiData ? (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className={`text-4xl font-bold font-mono ${
+                          rsiData.value >= 70 ? "text-red-500" :
+                          rsiData.value <= 30 ? "text-green-500" :
+                          rsiData.value >= 60 ? "text-green-500/80" :
+                          rsiData.value <= 40 ? "text-red-500/80" :
+                          "text-yellow-500"
+                        }`}>
+                          {rsiData.value.toFixed(1)}
+                        </p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {rsiData.value >= 70 ? "Consider selling - stock may be overvalued" :
+                           rsiData.value <= 30 ? "Consider buying - stock may be undervalued" :
+                           rsiData.value >= 60 ? "Bullish momentum" :
+                           rsiData.value <= 40 ? "Bearish momentum" :
+                           "Neutral territory"}
+                        </p>
+                      </div>
+                      <div className="w-32 h-32">
+                        <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                          <circle
+                            cx="50"
+                            cy="50"
+                            r="40"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="8"
+                            className="text-muted/20"
+                          />
+                          <motion.circle
+                            cx="50"
+                            cy="50"
+                            r="40"
+                            fill="none"
+                            stroke={
+                              rsiData.value >= 70 ? "#ef4444" :
+                              rsiData.value <= 30 ? "#22c55e" :
+                              rsiData.value >= 60 ? "#22c55e" :
+                              rsiData.value <= 40 ? "#ef4444" :
+                              "#eab308"
+                            }
+                            strokeWidth="8"
+                            strokeLinecap="round"
+                            strokeDasharray={`${(rsiData.value / 100) * 251.2} 251.2`}
+                            initial={{ strokeDasharray: "0 251.2" }}
+                            animate={{ strokeDasharray: `${(rsiData.value / 100) * 251.2} 251.2` }}
+                            transition={{ duration: 1, ease: "easeOut" }}
+                          />
+                        </svg>
+                      </div>
+                    </div>
+
+                    {/* RSI Scale */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs text-muted-foreground font-mono">
+                        <span>0</span>
+                        <span className="text-green-500">30</span>
+                        <span>50</span>
+                        <span className="text-red-500">70</span>
+                        <span>100</span>
+                      </div>
+                      <div className="h-2 bg-muted/20 rounded-full overflow-hidden relative">
+                        <div className="absolute inset-0 flex">
+                          <div className="w-[30%] bg-green-500/30" />
+                          <div className="w-[40%] bg-yellow-500/30" />
+                          <div className="w-[30%] bg-red-500/30" />
+                        </div>
+                        <motion.div
+                          className="absolute top-0 h-full w-1 bg-white rounded-full shadow-lg"
+                          initial={{ left: "0%" }}
+                          animate={{ left: `${rsiData.value}%` }}
+                          transition={{ duration: 1, ease: "easeOut" }}
+                          style={{ transform: "translateX(-50%)" }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-green-500">Oversold</span>
+                        <span className="text-yellow-500">Neutral</span>
+                        <span className="text-red-500">Overbought</span>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    RSI data unavailable
+                  </p>
+                )}
+              </CardContent>
+            </Card>
 
             {/* Candlestick Chart */}
             <Card className="bg-card/50 backdrop-blur border-border/50">
