@@ -4,8 +4,6 @@
 
 *Stocks only go up, right?* (Disclaimer: They don't.)
 
-![Project Banner](public/window.svg)
-
 ## ✨ Features (The Good Stuff)
 
 *   **Stonk Analysis**: Visualize price movements with charts that look professional enough to impress your friends. 📉📈
