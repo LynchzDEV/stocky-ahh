@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { validateSymbol } from "@/lib/validation";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { generateText } from "ai";
 
-const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query";
 
 // Cache configuration
@@ -311,10 +312,11 @@ export async function POST(request: NextRequest) {
 
     const { stockData, forceRefresh, model } = body;
     const selectedModel = model || "google/gemini-2.5-flash";
+    const cacheKey = `${symbol}:${selectedModel}`;
 
     // Check cache (unless force refresh is requested)
     if (!forceRefresh) {
-      const cached = analysisCache.get(symbol);
+      const cached = analysisCache.get(cacheKey);
       if (cached) {
         const now = Date.now();
         const age = now - cached.timestamp;
@@ -451,51 +453,26 @@ Current Trend: ${stockData.trend.charAt(0).toUpperCase() + stockData.trend.slice
 
 Provide your JSON analysis:`;
 
-    const response = await fetch(OPENROUTER_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${openRouterKey}`,
-        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-        "X-Title": "stocky-ahh - Stock Trend Analyzer",
-      },
-      body: JSON.stringify({
-        model: selectedModel,
+    let aiResponse: string;
+    try {
+      const openrouter = createOpenRouter({ apiKey: openRouterKey });
+      const { text } = await generateText({
+        model: openrouter(selectedModel),
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        max_tokens: 800,
+        maxOutputTokens: 800,
         temperature: 0.7,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error("OpenRouter API error:", errorData);
-
-      if (response.status === 403) {
-        const errorMessage = errorData?.error?.message || "";
-        if (errorMessage.includes("limit exceeded")) {
-          return NextResponse.json(
-            { error: "Rate limit exceeded", message: "AI API daily limit reached. Please try again tomorrow or upgrade your API plan." },
-            { status: 429 }
-          );
-        }
-        return NextResponse.json(
-          { error: "Access denied", message: "AI API access denied. Please check your API key configuration." },
-          { status: 403 }
-        );
-      }
-
+      });
+      aiResponse = text;
+    } catch (err) {
+      console.error("AI SDK error:", err);
       return NextResponse.json(
         { error: "AI service error", message: "Failed to get AI analysis. Please try again later." },
-        { status: response.status }
+        { status: 500 }
       );
     }
-
-    const data = await response.json();
-    const aiResponse = data.choices?.[0]?.message?.content;
 
     if (!aiResponse) {
       return NextResponse.json(
@@ -559,7 +536,7 @@ Provide your JSON analysis:`;
       };
     }
 
-    analysisCache.set(symbol, {
+    analysisCache.set(cacheKey, {
       analysis: parsedAnalysis,
       timestamp: Date.now(),
       stockPrice: stockData.currentPrice,
@@ -567,8 +544,7 @@ Provide your JSON analysis:`;
 
     return NextResponse.json({
       analysis: parsedAnalysis,
-      model: data.model || selectedModel,
-      usage: data.usage,
+      model: selectedModel,
       cached: false,
       enhancedData: {
         hasRSI: !!rsiData,
