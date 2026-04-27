@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, TrendingUp, TrendingDown, Minus, Info, BarChart3, Lightbulb, Sparkles, X, Star, History, Trash2, Target, Clock, AlertTriangle, DollarSign, ArrowUpCircle, ArrowDownCircle, Anchor, RefreshCw, ChevronDown, Check, Activity } from "lucide-react";
+import { Search, TrendingUp, TrendingDown, Minus, Info, BarChart3, Lightbulb, Sparkles, X, Star, History, Trash2, Target, Clock, AlertTriangle, ArrowUpCircle, ArrowDownCircle, RefreshCw, ChevronDown, Check, Activity } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -132,23 +132,30 @@ export function StockAnalyzer() {
     value: number;
     signal: "Overbought" | "Bullish" | "Neutral" | "Bearish" | "Oversold";
   } | null>(null);
-  const [rsiLoading, setRsiLoading] = useState(false);
+  const [macdData, setMacdData] = useState<{
+    macd: number;
+    signal: number;
+    histogram: number;
+    trend: "Bullish" | "Bearish" | "Neutral";
+  } | null>(null);
+  const [indicatorsLoading, setIndicatorsLoading] = useState(false);
 
-  // Fetch RSI when stock data changes
+  // Fetch indicators when stock data changes
   useEffect(() => {
     if (stockData?.symbol) {
       const fetchIndicators = async () => {
-        setRsiLoading(true);
+        setIndicatorsLoading(true);
         try {
           const response = await fetch(`/api/stock/${encodeURIComponent(stockData.symbol)}/indicators`);
           if (response.ok) {
             const data = await response.json();
             setRsiData(data.rsi);
+            setMacdData(data.macd);
           }
         } catch (err) {
           console.error("Failed to fetch indicators:", err);
         } finally {
-          setRsiLoading(false);
+          setIndicatorsLoading(false);
         }
       };
       fetchIndicators();
@@ -644,8 +651,8 @@ export function StockAnalyzer() {
                             : "bg-muted/20 border-border/30"
                             }`}>
                             <div className="flex items-center gap-2 mb-3">
-                              <Anchor className={`h-4 w-4 ${aiAnalysis.bottomFishing.recommended ? "text-cyan-500" : "text-muted-foreground"}`} />
-                              <p className="text-sm font-medium text-foreground">Bottom Fishing Strategy</p>
+                              <TrendingUp className={`h-4 w-4 ${aiAnalysis.bottomFishing.recommended ? "text-cyan-500" : "text-muted-foreground"}`} />
+                              <p className="text-sm font-medium text-foreground">BUY STRATEGY</p>
                               {aiAnalysis.bottomFishing.recommended && (
                                 <Badge variant="outline" className="text-xs border-cyan-500/50 text-cyan-500">
                                   Recommended
@@ -674,8 +681,8 @@ export function StockAnalyzer() {
                           {/* Price Target Section */}
                           <div className="p-4 rounded-lg bg-green-500/5 border border-green-500/30">
                             <div className="flex items-center gap-2 mb-3">
-                              <DollarSign className="h-4 w-4 text-green-500" />
-                              <p className="text-sm font-medium text-foreground">Price Target & Exit Strategy</p>
+                              <TrendingDown className="h-4 w-4 text-green-500" />
+                              <p className="text-sm font-medium text-foreground">SELL STRATEGY</p>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
                               <div className="text-center p-3 rounded-lg bg-green-500/10">
@@ -755,7 +762,7 @@ export function StockAnalyzer() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {rsiLoading ? (
+                {indicatorsLoading ? (
                   <div className="flex items-center justify-center py-8">
                     <Spinner size="md" />
                   </div>
@@ -847,6 +854,78 @@ export function StockAnalyzer() {
                 ) : (
                   <p className="text-sm text-muted-foreground text-center py-4">
                     RSI data unavailable
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* MACD Indicator Section */}
+            <Card className="bg-card/50 backdrop-blur border-border/50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <BarChart3 className="h-5 w-5" />
+                  MACD (12, 26, 9)
+                  {macdData && (
+                    <Badge
+                      variant="outline"
+                      className={`ml-2 ${
+                        macdData.trend === "Bullish" ? "border-green-500 text-green-500" :
+                        macdData.trend === "Bearish" ? "border-red-500 text-red-500" :
+                        "border-yellow-500 text-yellow-500"
+                      }`}
+                    >
+                      {macdData.trend}
+                    </Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {indicatorsLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Spinner size="md" />
+                  </div>
+                ) : macdData ? (
+                  <>
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="text-center">
+                        <p className="text-xs text-muted-foreground mb-1">MACD Line</p>
+                        <p className={`text-xl font-bold font-mono ${
+                          macdData.macd >= 0 ? "text-green-500" : "text-red-500"
+                        }`}>
+                          {macdData.macd >= 0 ? "+" : ""}{macdData.macd.toFixed(4)}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-muted-foreground mb-1">Signal Line</p>
+                        <p className={`text-xl font-bold font-mono ${
+                          macdData.signal >= 0 ? "text-green-500" : "text-red-500"
+                        }`}>
+                          {macdData.signal >= 0 ? "+" : ""}{macdData.signal.toFixed(4)}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-muted-foreground mb-1">Histogram</p>
+                        <p className={`text-xl font-bold font-mono ${
+                          macdData.histogram >= 0 ? "text-green-500" : "text-red-500"
+                        }`}>
+                          {macdData.histogram >= 0 ? "+" : ""}{macdData.histogram.toFixed(4)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <p className="text-sm text-muted-foreground text-center">
+                      {macdData.histogram > 0 && macdData.macd > macdData.signal
+                        ? "Bullish momentum - MACD above signal line"
+                        : macdData.histogram < 0 && macdData.macd < macdData.signal
+                        ? "Bearish momentum - MACD below signal line"
+                        : macdData.histogram > 0
+                        ? "Momentum shifting bullish"
+                        : "Momentum shifting bearish"}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-4">
+                    MACD data unavailable
                   </p>
                 )}
               </CardContent>
