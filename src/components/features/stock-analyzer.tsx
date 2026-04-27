@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, TrendingUp, TrendingDown, Minus, Info, BarChart3, Lightbulb, Sparkles, X, Star, History, Trash2, Target, Clock, AlertTriangle, ArrowUpCircle, ArrowDownCircle, RefreshCw, ChevronDown, Check, Activity } from "lucide-react";
+import { Search, TrendingUp, TrendingDown, Minus, Info, BarChart3, Lightbulb, Sparkles, X, Star, History, Trash2, Target, Clock, AlertTriangle, ArrowUpCircle, ArrowDownCircle, RefreshCw, ChevronDown, Check, Activity, Settings2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +14,7 @@ import type { StockData } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
 import { useSearchHistory } from "@/hooks/use-search-history";
 import { useWatchlist } from "@/hooks/use-watchlist";
+import { useDefaultAI } from "@/hooks/useDefaultAI";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -126,6 +127,10 @@ export function StockAnalyzer() {
     expiresIn?: number;
   } | null>(null);
   const [selectedModel, setSelectedModel] = useState(AI_MODELS[0]); // Default to Gemini 2.5 Flash
+  const { defaultAI, setDefaultAI } = useDefaultAI();
+  const [customModelInput, setCustomModelInput] = useState("");
+  const [showDefaultAISettings, setShowDefaultAISettings] = useState(false);
+  const [customDefaultInput, setCustomDefaultInput] = useState("");
 
   // Technical indicators state
   const [rsiData, setRsiData] = useState<{
@@ -162,6 +167,11 @@ export function StockAnalyzer() {
     }
   }, [stockData?.symbol]);
 
+  useEffect(() => {
+    const known = AI_MODELS.find((m) => m.id === defaultAI.id);
+    if (known) setSelectedModel(known);
+  }, [defaultAI.id]);
+
   // Get score color based on value
   const getScoreColor = (score: number) => {
     if (score >= 8) return { bg: "bg-green-500", text: "text-green-500", label: "Strong Buy" };
@@ -185,7 +195,7 @@ export function StockAnalyzer() {
         body: JSON.stringify({
           symbol: stockData.symbol,
           forceRefresh,
-          model: selectedModel.id,
+          model: customModelInput.trim() || selectedModel.id,
           stockData: {
             name: stockData.name,
             currentPrice: stockData.currentPrice,
@@ -270,6 +280,58 @@ export function StockAnalyzer() {
 
   return (
     <div className="space-y-6">
+      {/* Default AI Settings */}
+      <div className="fixed top-4 right-4 z-50">
+        <div className="relative">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowDefaultAISettings((v) => !v)}
+            className="h-8 w-8 p-0 border-white/10 bg-background/80 backdrop-blur-sm"
+            title="Default AI Settings"
+          >
+            <Settings2 className="h-4 w-4 text-muted-foreground" />
+          </Button>
+          {showDefaultAISettings && (
+            <div className="absolute top-10 right-0 w-64 bg-background border border-border rounded-lg shadow-lg p-4 space-y-3">
+              <p className="text-xs font-medium text-foreground">Default AI Model</p>
+              <p className="text-xs text-muted-foreground">Used for AI Insight and Council summary</p>
+              <select
+                value={defaultAI.id}
+                onChange={(e) => {
+                  const m = AI_MODELS.find((x) => x.id === e.target.value);
+                  if (m) setDefaultAI({ id: m.id, name: m.name });
+                }}
+                className="w-full text-xs bg-muted border border-border rounded px-2 py-1.5 text-foreground"
+              >
+                {AI_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+              <Input
+                placeholder="or custom model id..."
+                value={customDefaultInput}
+                onChange={(e) => setCustomDefaultInput(e.target.value)}
+                className="h-7 text-xs"
+              />
+              <Button
+                size="sm"
+                className="w-full h-7 text-xs"
+                onClick={() => {
+                  if (customDefaultInput.trim()) {
+                    setDefaultAI({ id: customDefaultInput.trim(), name: customDefaultInput.trim() });
+                    setCustomDefaultInput("");
+                  }
+                  setShowDefaultAISettings(false);
+                }}
+              >
+                Save
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Search Section */}
       <Card className="bg-card/50 backdrop-blur border-border/50">
         <CardContent className="pt-6">
@@ -478,6 +540,14 @@ export function StockAnalyzer() {
                             ))}
                           </DropdownMenuContent>
                         </DropdownMenu>
+
+                        {/* Custom model input */}
+                        <Input
+                          placeholder="custom model id..."
+                          value={customModelInput}
+                          onChange={(e) => setCustomModelInput(e.target.value)}
+                          className="h-8 text-xs w-40 border-amber-500/30 bg-transparent text-amber-500 placeholder:text-amber-500/40 focus-visible:ring-amber-500/50"
+                        />
 
                         {/* AI Insight Button */}
                         <Button
