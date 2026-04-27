@@ -2,13 +2,15 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, TrendingUp, TrendingDown, Minus, Info, BarChart3, Lightbulb, Sparkles, X, Star, History, Trash2, Target, Clock, AlertTriangle, ArrowUpCircle, ArrowDownCircle, RefreshCw, ChevronDown, Check, Activity, Settings2 } from "lucide-react";
+import { Search, TrendingUp, TrendingDown, Minus, Info, BarChart3, Lightbulb, Sparkles, X, Star, History, Trash2, Target, Clock, AlertTriangle, ArrowUpCircle, ArrowDownCircle, RefreshCw, ChevronDown, Check, Activity, Settings2, Users } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CandlestickChart } from "./candlestick-chart";
 import { StockNews } from "./stock-news";
+import { AiCouncilPanel } from "./ai-council-panel";
+import type { CouncilResult } from "./ai-council-panel";
 import { validateSymbol, RateLimiter } from "@/lib/validation";
 import type { StockData } from "@/lib/types";
 import { Spinner } from "@/components/ui/spinner";
@@ -132,6 +134,15 @@ export function StockAnalyzer() {
   const [showDefaultAISettings, setShowDefaultAISettings] = useState(false);
   const [customDefaultInput, setCustomDefaultInput] = useState("");
 
+  // AI Council state
+  const [showCouncilSelector, setShowCouncilSelector] = useState(false);
+  const [selectedCouncilModels, setSelectedCouncilModels] = useState<string[]>([]);
+  const [councilResults, setCouncilResults] = useState<CouncilResult[]>([]);
+  const [councilSummary, setCouncilSummary] = useState<string | null>(null);
+  const [councilSummaryLoading, setCouncilSummaryLoading] = useState(false);
+  const [councilSummaryError, setCouncilSummaryError] = useState<string | null>(null);
+  const [showCouncilPanel, setShowCouncilPanel] = useState(false);
+
   // Technical indicators state
   const [rsiData, setRsiData] = useState<{
     value: number;
@@ -228,6 +239,96 @@ export function StockAnalyzer() {
       setAiLoading(false);
     }
   }, [stockData, selectedModel]);
+
+  const runCouncil = useCallback(async () => {
+    if (!stockData || selectedCouncilModels.length === 0) return;
+
+    const modelsToRun = AI_MODELS.filter((m) => selectedCouncilModels.includes(m.id));
+
+    const initial: CouncilResult[] = modelsToRun.map((m) => ({
+      modelId: m.id,
+      modelName: m.name,
+      analysis: null,
+      loading: true,
+      error: null,
+    }));
+    setCouncilResults(initial);
+    setCouncilSummary(null);
+    setCouncilSummaryError(null);
+    setShowCouncilPanel(true);
+    setShowCouncilSelector(false);
+
+    const promises = modelsToRun.map(async (model) => {
+      try {
+        const res = await fetch("/api/ai", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            symbol: stockData.symbol,
+            forceRefresh: false,
+            model: model.id,
+            stockData: {
+              name: stockData.name,
+              currentPrice: stockData.currentPrice,
+              change: stockData.change,
+              changePercent: stockData.changePercent,
+              dayHigh: stockData.dayHigh,
+              dayLow: stockData.dayLow,
+              volume: stockData.volume,
+              sharpeRatio: stockData.sharpeRatio,
+              trend: stockData.trend,
+            },
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || "Analysis failed");
+        setCouncilResults((prev) =>
+          prev.map((r) =>
+            r.modelId === model.id
+              ? { ...r, analysis: data.analysis, loading: false }
+              : r
+          )
+        );
+        return { modelId: model.id, modelName: model.name, analysis: data.analysis };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        setCouncilResults((prev) =>
+          prev.map((r) =>
+            r.modelId === model.id
+              ? { ...r, error: msg, loading: false }
+              : r
+          )
+        );
+        return null;
+      }
+    });
+
+    const settled = await Promise.all(promises);
+    const successful = settled.filter(Boolean) as { modelId: string; modelName: string; analysis: NonNullable<CouncilResult["analysis"]> }[];
+
+    if (successful.length === 0) return;
+
+    setCouncilSummaryLoading(true);
+    try {
+      const summRes = await fetch("/api/ai/summarize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          symbol: stockData.symbol,
+          currentPrice: stockData.currentPrice,
+          analyses: successful,
+          defaultModel: defaultAI.id,
+        }),
+      });
+      const summData = await summRes.json();
+      if (!summRes.ok) throw new Error(summData.error || "Summary failed");
+      setCouncilSummary(summData.summary);
+    } catch (err) {
+      setCouncilSummaryError(err instanceof Error ? err.message : "Failed to summarize");
+    } finally {
+      setCouncilSummaryLoading(false);
+    }
+  }, [stockData, selectedCouncilModels, defaultAI.id]);
 
   const fetchStockData = useCallback(async (searchSymbol: string) => {
     const validSymbol = validateSymbol(searchSymbol);
@@ -564,6 +665,55 @@ export function StockAnalyzer() {
                           )}
                           <span className="hidden sm:inline">AI Insight</span>
                         </Button>
+
+                        {/* AI Council button */}
+                        <div className="relative">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowCouncilSelector((v) => !v)}
+                            disabled={!stockData}
+                            className="gap-1.5 border-purple-500/30 hover:border-purple-500/50 hover:bg-purple-500/10 text-purple-400"
+                          >
+                            <Users className="h-4 w-4" />
+                            <span className="hidden sm:inline">AI Council</span>
+                          </Button>
+
+                          {showCouncilSelector && (
+                            <div className="absolute top-10 right-0 z-50 w-64 bg-background border border-border rounded-lg shadow-lg p-3 space-y-2">
+                              <p className="text-xs font-medium text-foreground">Select models (2–5)</p>
+                              {AI_MODELS.map((m) => (
+                                <label key={m.id} className="flex items-center gap-2 cursor-pointer group">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedCouncilModels.includes(m.id)}
+                                    onChange={(e) => {
+                                      if (e.target.checked && selectedCouncilModels.length >= 5) return;
+                                      setSelectedCouncilModels((prev) =>
+                                        e.target.checked ? [...prev, m.id] : prev.filter((id) => id !== m.id)
+                                      );
+                                    }}
+                                    className="rounded border-border"
+                                  />
+                                  <span className="text-xs text-foreground/80 group-hover:text-foreground">{m.name}</span>
+                                  <span className="text-[10px] text-muted-foreground ml-auto">{m.provider}</span>
+                                </label>
+                              ))}
+                              <div className="pt-1 border-t border-border/50">
+                                <p className="text-xs text-muted-foreground mb-1">{selectedCouncilModels.length}/5 selected</p>
+                                <Button
+                                  size="sm"
+                                  className="w-full h-7 text-xs bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border-purple-500/30"
+                                  variant="outline"
+                                  disabled={selectedCouncilModels.length < 2}
+                                  onClick={runCouncil}
+                                >
+                                  Run Council
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <p className="text-muted-foreground text-sm mt-1">{stockData.name}</p>
@@ -805,6 +955,24 @@ export function StockAnalyzer() {
                       </p>
                     </CardContent>
                   </Card>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* AI Council Panel */}
+            <AnimatePresence>
+              {showCouncilPanel && councilResults.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                >
+                  <AiCouncilPanel
+                    results={councilResults}
+                    summary={councilSummary}
+                    summaryLoading={councilSummaryLoading}
+                    summaryError={councilSummaryError}
+                  />
                 </motion.div>
               )}
             </AnimatePresence>
