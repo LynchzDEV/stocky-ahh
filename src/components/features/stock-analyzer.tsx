@@ -42,32 +42,8 @@ import { Spinner } from '@/components/ui/spinner';
 import { useSearchHistory } from '@/hooks/use-search-history';
 import { useWatchlist } from '@/hooks/use-watchlist';
 import { useDefaultAI } from '@/hooks/useDefaultAI';
+import { useAiModels } from '@/hooks/useAiModels';
 
-// AI Model configurations
-const AI_MODELS = [
-  {
-    id: 'google/gemini-2.5-flash',
-    name: 'Gemini 2.5 Flash',
-    provider: 'Google',
-    badge: 'Default',
-  },
-  { id: 'openai/gpt-oss-120b', name: 'GPT-OSS 120B', provider: 'OpenAI' },
-  { id: 'x-ai/grok-4.1-fast', name: 'Grok 4.1 Fast', provider: 'xAI' },
-  { id: 'qwen/qwen3-vl-8b-instruct', name: 'Qwen3 VL 8B', provider: 'Qwen' },
-  { id: 'openai/gpt-5-mini', name: 'GPT-5 Mini', provider: 'OpenAI' },
-  { id: 'qwen/qwen3-32b', name: 'Qwen3 32B', provider: 'Qwen' },
-  { id: 'openai/gpt-4.1-nano', name: 'GPT-4.1 Nano', provider: 'OpenAI' },
-  {
-    id: 'deepseek/deepseek-chat-v3.1',
-    name: 'DeepSeek V3.1',
-    provider: 'DeepSeek',
-  },
-  {
-    id: 'google/gemini-3-pro-preview',
-    name: 'Gemini 3 Pro',
-    provider: 'Google',
-  },
-];
 
 const POPULAR_STOCKS = ['AAPL', 'GOOGL', 'TSLA', 'MSFT', 'AMZN', 'NVDA'];
 
@@ -162,9 +138,13 @@ export function StockAnalyzer() {
     cachedAt?: string;
     expiresIn?: number;
   } | null>(null);
-  const [selectedModel, setSelectedModel] = useState(AI_MODELS[0]); // Default to Gemini 2.5 Flash
   const { defaultAI, setDefaultAI } = useDefaultAI();
+  const { models: AI_MODELS, addModel, removeModel, resetToDefaults } = useAiModels();
+  const [selectedModel, setSelectedModel] = useState(() => AI_MODELS[0]);
   const [customModelInput, setCustomModelInput] = useState('');
+  const [newPresetId, setNewPresetId] = useState('');
+  const [newPresetName, setNewPresetName] = useState('');
+  const [newPresetProvider, setNewPresetProvider] = useState('');
   const [showDefaultAISettings, setShowDefaultAISettings] = useState(false);
   const [customDefaultInput, setCustomDefaultInput] = useState('');
 
@@ -453,6 +433,60 @@ export function StockAnalyzer() {
     }
   }, [stockData, selectedCouncilModels, defaultAI.id]);
 
+  const retryCouncilModel = useCallback(
+    async (modelId: string) => {
+      if (!stockData) return;
+      const model = councilResults.find(r => r.modelId === modelId);
+      if (!model) return;
+
+      setCouncilResults(prev =>
+        prev.map(r =>
+          r.modelId === modelId ? { ...r, loading: true, error: null } : r,
+        ),
+      );
+
+      try {
+        const res = await fetch('/api/ai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbol: stockData.symbol,
+            forceRefresh: true,
+            model: modelId,
+            stockData: {
+              name: stockData.name,
+              currentPrice: stockData.currentPrice,
+              change: stockData.change,
+              changePercent: stockData.changePercent,
+              dayHigh: stockData.dayHigh,
+              dayLow: stockData.dayLow,
+              volume: stockData.volume,
+              sharpeRatio: stockData.sharpeRatio,
+              trend: stockData.trend,
+            },
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Analysis failed');
+        setCouncilResults(prev =>
+          prev.map(r =>
+            r.modelId === modelId
+              ? { ...r, analysis: data.analysis, loading: false }
+              : r,
+          ),
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Unknown error';
+        setCouncilResults(prev =>
+          prev.map(r =>
+            r.modelId === modelId ? { ...r, error: msg, loading: false } : r,
+          ),
+        );
+      }
+    },
+    [stockData, councilResults],
+  );
+
   const fetchStockData = useCallback(
     async (searchSymbol: string) => {
       const validSymbol = validateSymbol(searchSymbol);
@@ -536,49 +570,117 @@ export function StockAnalyzer() {
             <Settings2 className="h-4 w-4 text-muted-foreground" />
           </Button>
           {showDefaultAISettings && (
-            <div className="absolute top-10 right-0 w-64 bg-background border border-border rounded-lg shadow-lg p-4 space-y-3">
-              <p className="text-xs font-medium text-foreground">
-                Default AI Model
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Used for AI Insight and Council summary
-              </p>
-              <select
-                value={defaultAI.id}
-                onChange={e => {
-                  const m = AI_MODELS.find(x => x.id === e.target.value);
-                  if (m) setDefaultAI({ id: m.id, name: m.name });
-                }}
-                className="w-full text-xs bg-muted border border-border rounded px-2 py-1.5 text-foreground"
-              >
-                {AI_MODELS.map(m => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-              <Input
-                placeholder="or custom model id..."
-                value={customDefaultInput}
-                onChange={e => setCustomDefaultInput(e.target.value)}
-                className="h-7 text-xs"
-              />
-              <Button
-                size="sm"
-                className="w-full h-7 text-xs"
-                onClick={() => {
-                  if (customDefaultInput.trim()) {
-                    setDefaultAI({
-                      id: customDefaultInput.trim(),
-                      name: customDefaultInput.trim(),
-                    });
-                    setCustomDefaultInput('');
-                  }
-                  setShowDefaultAISettings(false);
-                }}
-              >
-                Save
-              </Button>
+            <div className="absolute top-10 right-0 w-72 bg-background border border-border rounded-lg shadow-lg p-4 space-y-4 max-h-[80vh] overflow-y-auto">
+              {/* Default AI */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-foreground">Default AI Model</p>
+                <p className="text-xs text-muted-foreground">Used for AI Insight and Council summary</p>
+                <select
+                  value={defaultAI.id}
+                  onChange={e => {
+                    const m = AI_MODELS.find(x => x.id === e.target.value);
+                    if (m) setDefaultAI({ id: m.id, name: m.name });
+                  }}
+                  className="w-full text-xs bg-muted border border-border rounded px-2 py-1.5 text-foreground"
+                >
+                  {AI_MODELS.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+                <Input
+                  placeholder="or custom model id..."
+                  value={customDefaultInput}
+                  onChange={e => setCustomDefaultInput(e.target.value)}
+                  className="h-7 text-xs"
+                />
+                <Button
+                  size="sm"
+                  className="w-full h-7 text-xs"
+                  onClick={() => {
+                    if (customDefaultInput.trim()) {
+                      setDefaultAI({ id: customDefaultInput.trim(), name: customDefaultInput.trim() });
+                      setCustomDefaultInput('');
+                    }
+                    setShowDefaultAISettings(false);
+                  }}
+                >
+                  Save
+                </Button>
+              </div>
+
+              {/* Preset Management */}
+              <div className="space-y-2 pt-3 border-t border-border/50">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-foreground">Manage Presets</p>
+                  <button
+                    onClick={resetToDefaults}
+                    className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                  >
+                    Reset defaults
+                  </button>
+                </div>
+
+                {/* Model list */}
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {AI_MODELS.map(m => (
+                    <div key={m.id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-muted/30 group">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium truncate">{m.name}</p>
+                        <p className="text-[10px] text-muted-foreground truncate">{m.id}</p>
+                      </div>
+                      <button
+                        onClick={() => removeModel(m.id)}
+                        className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 transition-opacity shrink-0"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add new preset */}
+                <div className="space-y-1.5 pt-2 border-t border-border/30">
+                  <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Add Preset</p>
+                  <Input
+                    placeholder="Model ID (e.g. anthropic/claude-3-5-sonnet)"
+                    value={newPresetId}
+                    onChange={e => setNewPresetId(e.target.value)}
+                    className="h-7 text-xs"
+                  />
+                  <div className="flex gap-1">
+                    <Input
+                      placeholder="Display name"
+                      value={newPresetName}
+                      onChange={e => setNewPresetName(e.target.value)}
+                      className="h-7 text-xs flex-1"
+                    />
+                    <Input
+                      placeholder="Provider"
+                      value={newPresetProvider}
+                      onChange={e => setNewPresetProvider(e.target.value)}
+                      className="h-7 text-xs w-20"
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    className="w-full h-7 text-xs"
+                    variant="outline"
+                    disabled={!newPresetId.trim() || !newPresetName.trim()}
+                    onClick={() => {
+                      addModel({
+                        id: newPresetId.trim(),
+                        name: newPresetName.trim(),
+                        provider: newPresetProvider.trim() || 'Custom',
+                      });
+                      setNewPresetId('');
+                      setNewPresetName('');
+                      setNewPresetProvider('');
+                    }}
+                  >
+                    Add to presets
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -1141,10 +1243,19 @@ export function StockAnalyzer() {
                               </div>
                             )}
                             {aiError && (
-                              <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4">
+                              <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4 flex items-center justify-between gap-3">
                                 <p className="text-destructive text-sm">
                                   {aiError}
                                 </p>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => fetchAiAnalysis()}
+                                  className="shrink-0 h-7 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+                                >
+                                  <RefreshCw className="h-3 w-3 mr-1" />
+                                  Retry
+                                </Button>
                               </div>
                             )}
                             {aiAnalysis && !aiLoading && (
@@ -1391,6 +1502,7 @@ export function StockAnalyzer() {
                             summaryAnalysis={councilSummaryAnalysis}
                             summaryLoading={councilSummaryLoading}
                             summaryError={councilSummaryError}
+                            onRetryModel={retryCouncilModel}
                           />
                         )}
                     </CardContent>

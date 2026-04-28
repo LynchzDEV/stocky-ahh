@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "docker:build": "docker buildx build --platform linux/amd64,linux/arm64 -t lynchz/stocky-ahh:latest --push ."
   },
   "dependencies": {
     "@openrouter/ai-sdk-provider": "^2.8.1",

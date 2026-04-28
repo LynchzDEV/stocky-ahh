@@ -12,6 +12,7 @@ import {
   ArrowUpCircle,
   ArrowDownCircle,
   Minus,
+  RefreshCw,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Spinner } from '@/components/ui/spinner';
@@ -50,6 +51,7 @@ interface AiCouncilPanelProps {
   summaryAnalysis: ModelAnalysis | null;
   summaryLoading: boolean;
   summaryError: string | null;
+  onRetryModel?: (modelId: string) => void;
 }
 
 function getPredictionLabel(prediction: string) {
@@ -243,6 +245,7 @@ export function AiCouncilPanel({
   summaryAnalysis,
   summaryLoading,
   summaryError,
+  onRetryModel,
 }: AiCouncilPanelProps) {
   const [activeTab, setActiveTab] = useState(results[0]?.modelId ?? 'summary');
 
@@ -371,8 +374,17 @@ export function AiCouncilPanel({
                 </div>
               )}
               {activeResult.error && (
-                <div className="py-4 text-center text-sm text-red-400">
-                  {activeResult.error}
+                <div className="py-4 flex flex-col items-center gap-2">
+                  <p className="text-sm text-red-400">{activeResult.error}</p>
+                  {onRetryModel && (
+                    <button
+                      onClick={() => onRetryModel(activeResult.modelId)}
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border/50 rounded px-2 py-1 hover:bg-muted/30 transition-colors"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Retry
+                    </button>
+                  )}
                 </div>
               )}
               {activeResult.analysis && (
