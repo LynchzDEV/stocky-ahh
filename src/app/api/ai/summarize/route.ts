@@ -56,13 +56,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!symbol || typeof currentPrice !== 'number' || !defaultModel) {
-    return NextResponse.json(
-      { error: 'Missing required fields' },
-      { status: 400 },
-    );
-  }
-
   if (!analyses || analyses.length === 0) {
     return NextResponse.json(
       { error: 'No analyses provided' },
@@ -80,27 +73,67 @@ Risks: ${a.analysis.riskFactors.join('; ')}`,
     )
     .join('\n\n');
 
+  const avgScore =
+    analyses.reduce((sum, a) => sum + a.analysis.score, 0) / analyses.length;
+  const avgPrice =
+    analyses.reduce(
+      (sum, a) => sum + (a.analysis.priceTarget.targetPrice || currentPrice),
+      0,
+    ) / analyses.length;
+  const avgRise =
+    analyses.reduce(
+      (sum, a) => sum + (a.analysis.priceTarget.expectedRise || 0),
+      0,
+    ) / analyses.length;
+  const avgEntry =
+    analyses.reduce(
+      (sum, a) => sum + (a.analysis.bottomFishing.targetPrice || currentPrice),
+      0,
+    ) / analyses.length;
+
   const prompt = `You are a senior financial analyst synthesizing ${analyses.length} independent AI analyses for ${symbol} at $${currentPrice}.
 
 ${analysisText}
 
-Write a 3-4 sentence council summary covering:
-1. Key points of agreement between models
-2. Notable disagreements and which view is stronger
-3. Final recommendation (Buy / Hold / Sell) with one-sentence rationale
-
-Plain text only, no JSON, no markdown headers, no bullet points.`;
+Synthesize these analyses into a consensus view. Return ONLY valid JSON (no markdown, no explanation):
+{
+  "score": ${Math.round(avgScore)},
+  "prediction": "<UP or DOWN or HOLD — pick the majority view>",
+  "confidence": <weighted average confidence 0-100>,
+  "reasons": ["<consensus point 1>", "<consensus point 2>", "<consensus point 3>"],
+  "bottomFishing": {
+    "recommended": <true if majority recommend buying>,
+    "targetPrice": ${avgEntry.toFixed(2)},
+    "timing": "<consensus timing e.g. 'Near-term' or 'Wait for dip'>",
+    "rationale": "<one sentence consensus buy rationale>"
+  },
+  "priceTarget": {
+    "expectedRise": ${avgRise.toFixed(1)},
+    "targetPrice": ${avgPrice.toFixed(2)},
+    "timeframe": "<consensus timeframe>",
+    "exitStrategy": "<one sentence consensus exit strategy>"
+  },
+  "riskFactors": ["<consensus risk 1>", "<consensus risk 2>", "<consensus risk 3>"]
+}`;
 
   try {
     const openrouter = createOpenRouter({ apiKey: openRouterKey });
     const { text } = await generateText({
       model: openrouter(defaultModel),
       messages: [{ role: 'user', content: prompt }],
-      maxOutputTokens: 400,
-      temperature: 0.5,
+      maxOutputTokens: 600,
+      temperature: 0.3,
     });
 
-    return NextResponse.json({ summary: text });
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return NextResponse.json(
+        { error: 'Failed to parse council summary' },
+        { status: 500 },
+      );
+    }
+    const analysis = JSON.parse(jsonMatch[0]);
+    return NextResponse.json({ analysis });
   } catch (err) {
     console.error('Summarize error:', err);
     return NextResponse.json(

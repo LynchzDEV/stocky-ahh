@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search,
@@ -41,14 +41,6 @@ import { Spinner } from '@/components/ui/spinner';
 import { useSearchHistory } from '@/hooks/use-search-history';
 import { useWatchlist } from '@/hooks/use-watchlist';
 import { useDefaultAI } from '@/hooks/useDefaultAI';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 
 // AI Model configurations
 const AI_MODELS = [
@@ -176,17 +168,25 @@ export function StockAnalyzer() {
   const [customDefaultInput, setCustomDefaultInput] = useState('');
 
   // AI Council state
-  const [showCouncilSelector, setShowCouncilSelector] = useState(false);
   const [selectedCouncilModels, setSelectedCouncilModels] = useState<string[]>(
     [],
   );
   const [councilResults, setCouncilResults] = useState<CouncilResult[]>([]);
-  const [councilSummary, setCouncilSummary] = useState<string | null>(null);
+  const [councilSummaryAnalysis, setCouncilSummaryAnalysis] =
+    useState<import('./ai-council-panel').ModelAnalysis | null>(null);
   const [councilSummaryLoading, setCouncilSummaryLoading] = useState(false);
   const [councilSummaryError, setCouncilSummaryError] = useState<string | null>(
     null,
   );
   const [showCouncilPanel, setShowCouncilPanel] = useState(false);
+
+  // Unified AI dropdown
+  const [showAiDropdown, setShowAiDropdown] = useState(false);
+  const [aiActiveTab, setAiActiveTab] = useState<'insight' | 'council'>(
+    'insight',
+  );
+  const aiDropdownRef = useRef<HTMLDivElement>(null);
+  const settingsPanelRef = useRef<HTMLDivElement>(null);
 
   // Technical indicators state
   const [rsiData, setRsiData] = useState<{
@@ -230,6 +230,34 @@ export function StockAnalyzer() {
     if (known) setSelectedModel(known);
   }, [defaultAI.id]);
 
+  useEffect(() => {
+    if (!showAiDropdown) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        aiDropdownRef.current &&
+        !aiDropdownRef.current.contains(e.target as Node)
+      ) {
+        setShowAiDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showAiDropdown]);
+
+  useEffect(() => {
+    if (!showDefaultAISettings) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        settingsPanelRef.current &&
+        !settingsPanelRef.current.contains(e.target as Node)
+      ) {
+        setShowDefaultAISettings(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showDefaultAISettings]);
+
   // Get score color based on value
   const getScoreColor = (score: number) => {
     if (score >= 8)
@@ -254,6 +282,7 @@ export function StockAnalyzer() {
       setAiLoading(true);
       setAiError(null);
       setShowAiPanel(true);
+      setAiActiveTab('insight');
 
       try {
         const response = await fetch('/api/ai', {
@@ -317,11 +346,11 @@ export function StockAnalyzer() {
       error: null,
     }));
     setCouncilResults(initial);
-    setCouncilSummary(null);
+    setCouncilSummaryAnalysis(null);
     setCouncilSummaryLoading(false);
     setCouncilSummaryError(null);
     setShowCouncilPanel(true);
-    setShowCouncilSelector(false);
+    setAiActiveTab('council');
 
     const promises = modelsToRun.map(async model => {
       try {
@@ -393,7 +422,7 @@ export function StockAnalyzer() {
       });
       const summData = await summRes.json();
       if (!summRes.ok) throw new Error(summData.error || 'Summary failed');
-      setCouncilSummary(summData.summary);
+      setCouncilSummaryAnalysis(summData.analysis);
     } catch (err) {
       setCouncilSummaryError(
         err instanceof Error ? err.message : 'Failed to summarize',
@@ -420,7 +449,7 @@ export function StockAnalyzer() {
       setError(null);
       setShowCouncilPanel(false);
       setCouncilResults([]);
-      setCouncilSummary(null);
+      setCouncilSummaryAnalysis(null);
 
       try {
         const response = await fetch(
@@ -475,7 +504,7 @@ export function StockAnalyzer() {
     <div className="space-y-6">
       {/* Default AI Settings */}
       <div className="fixed top-4 right-4 z-50">
-        <div className="relative">
+        <div className="relative" ref={settingsPanelRef}>
           <Button
             variant="outline"
             size="sm"
@@ -705,151 +734,149 @@ export function StockAnalyzer() {
                           stockData.trend.slice(1)}
                       </Badge>
 
-                      {/* AI Model Selector + Insight Button */}
-                      <div className="flex items-center gap-1 ml-2">
-                        {/* Model Dropdown using shadcn */}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 text-xs gap-1 border-amber-500/30 text-amber-500 hover:bg-amber-500/10 pr-2"
-                            >
-                              <span className="hidden sm:inline max-w-[100px] truncate">
-                                {selectedModel.name}
-                              </span>
-                              <span className="sm:hidden">
-                                {selectedModel.provider}
-                              </span>
-                              <ChevronDown className="h-3 w-3" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-56">
-                            <DropdownMenuLabel>
-                              Select AI Model
-                            </DropdownMenuLabel>
-                            <DropdownMenuSeparator />
-                            {AI_MODELS.map(model => (
-                              <DropdownMenuItem
-                                key={model.id}
-                                onClick={() => setSelectedModel(model)}
-                                className="flex items-center justify-between cursor-pointer"
-                              >
-                                <div>
-                                  <p className="font-medium">{model.name}</p>
-                                  <p className="text-xs text-muted-foreground">
-                                    {model.provider}
-                                  </p>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  {model.badge && (
-                                    <Badge
-                                      variant="outline"
-                                      className="text-[10px] border-green-500/30 text-green-500"
-                                    >
-                                      {model.badge}
-                                    </Badge>
-                                  )}
-                                  {selectedModel.id === model.id && (
-                                    <Check className="h-4 w-4 text-amber-500" />
-                                  )}
-                                </div>
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-
-                        {/* Custom model input */}
-                        <Input
-                          placeholder="custom model id..."
-                          value={customModelInput}
-                          onChange={e => setCustomModelInput(e.target.value)}
-                          className="h-8 text-xs w-40 border-amber-500/30 bg-transparent text-amber-500 placeholder:text-amber-500/40 focus-visible:ring-amber-500/50"
-                        />
-
-                        {/* AI Insight Button */}
+                      {/* Unified AI Button */}
+                      <div className="relative ml-2" ref={aiDropdownRef}>
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => fetchAiAnalysis()}
-                          disabled={aiLoading}
-                          className="gap-1.5 bg-gradient-to-r from-amber-500/10 to-yellow-500/10 border-amber-500/30 hover:border-amber-500/50 hover:bg-amber-500/20 text-amber-500"
+                          onClick={() => setShowAiDropdown(v => !v)}
+                          disabled={!stockData}
+                          className="gap-1.5 bg-gradient-to-r from-amber-500/10 to-purple-500/10 border-amber-500/30 hover:border-amber-500/50 text-amber-400"
                         >
-                          {aiLoading ? (
-                            <Spinner size="sm" className="text-amber-500" />
-                          ) : (
-                            <Lightbulb className="h-4 w-4" />
-                          )}
-                          <span className="hidden sm:inline">AI Insight</span>
+                          <Sparkles className="h-4 w-4" />
+                          <span className="hidden sm:inline">AI</span>
+                          <ChevronDown className="h-3 w-3" />
                         </Button>
 
-                        {/* AI Council button */}
-                        <div className="relative">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setShowCouncilSelector(v => !v)}
-                            disabled={!stockData}
-                            className="gap-1.5 border-purple-500/30 hover:border-purple-500/50 hover:bg-purple-500/10 text-purple-400"
-                          >
-                            <Users className="h-4 w-4" />
-                            <span className="hidden sm:inline">AI Council</span>
-                          </Button>
-
-                          {showCouncilSelector && (
-                            <div className="absolute top-10 right-0 z-50 w-64 bg-background border border-border rounded-lg shadow-lg p-3 space-y-2">
-                              <p className="text-xs font-medium text-foreground">
-                                Select models (2–5)
+                        {showAiDropdown && (
+                          <div className="absolute top-10 right-0 z-50 w-72 bg-background border border-border rounded-lg shadow-lg p-3 space-y-3">
+                            {/* Model selection */}
+                            <div>
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+                                Model
                               </p>
-                              {AI_MODELS.map(m => (
-                                <label
-                                  key={m.id}
-                                  className="flex items-center gap-2 cursor-pointer group"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedCouncilModels.includes(
-                                      m.id,
-                                    )}
-                                    onChange={e => {
-                                      if (
-                                        e.target.checked &&
-                                        selectedCouncilModels.length >= 5
-                                      )
-                                        return;
-                                      setSelectedCouncilModels(prev =>
-                                        e.target.checked
-                                          ? [...prev, m.id]
-                                          : prev.filter(id => id !== m.id),
-                                      );
+                              <div className="space-y-0.5 max-h-44 overflow-y-auto">
+                                {AI_MODELS.map(m => (
+                                  <button
+                                    key={m.id}
+                                    onClick={() => {
+                                      setSelectedModel(m);
+                                      setCustomModelInput('');
                                     }}
-                                    className="rounded border-border"
-                                  />
-                                  <span className="text-xs text-foreground/80 group-hover:text-foreground">
-                                    {m.name}
+                                    className={`w-full flex items-center justify-between px-2 py-1.5 rounded text-xs transition-colors ${
+                                      selectedModel.id === m.id &&
+                                      !customModelInput
+                                        ? 'bg-amber-500/10 text-amber-400'
+                                        : 'text-foreground/80 hover:bg-muted/50'
+                                    }`}
+                                  >
+                                    <div className="text-left">
+                                      <span className="font-medium">
+                                        {m.name}
+                                      </span>
+                                      <span className="text-muted-foreground ml-1.5 text-[10px]">
+                                        {m.provider}
+                                      </span>
+                                    </div>
+                                    {selectedModel.id === m.id &&
+                                      !customModelInput && (
+                                        <Check className="h-3 w-3 text-amber-500 shrink-0" />
+                                      )}
+                                  </button>
+                                ))}
+                              </div>
+                              <div className="mt-1.5 pt-1.5 border-t border-border/50">
+                                <Input
+                                  placeholder="use custom model..."
+                                  value={customModelInput}
+                                  onChange={e =>
+                                    setCustomModelInput(e.target.value)
+                                  }
+                                  className="h-7 text-xs border-amber-500/20 bg-transparent placeholder:text-muted-foreground/50"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Actions */}
+                            <div className="space-y-2 pt-2 border-t border-border/50">
+                              {/* AI Insight */}
+                              <Button
+                                size="sm"
+                                className="w-full gap-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border-amber-500/30"
+                                variant="outline"
+                                onClick={() => {
+                                  fetchAiAnalysis();
+                                  setShowAiDropdown(false);
+                                }}
+                                disabled={aiLoading}
+                              >
+                                {aiLoading ? (
+                                  <Spinner size="sm" />
+                                ) : (
+                                  <Lightbulb className="h-3.5 w-3.5" />
+                                )}
+                                AI Insight
+                              </Button>
+
+                              {/* AI Council */}
+                              <div className="space-y-1.5">
+                                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                  AI Council{' '}
+                                  <span className="normal-case font-normal">
+                                    (2–5 models)
                                   </span>
-                                  <span className="text-[10px] text-muted-foreground ml-auto">
-                                    {m.provider}
-                                  </span>
-                                </label>
-                              ))}
-                              <div className="pt-1 border-t border-border/50">
-                                <p className="text-xs text-muted-foreground mb-1">
-                                  {selectedCouncilModels.length}/5 selected
                                 </p>
+                                <div className="grid grid-cols-2 gap-1">
+                                  {AI_MODELS.map(m => (
+                                    <label
+                                      key={m.id}
+                                      className="flex items-center gap-1.5 cursor-pointer group"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedCouncilModels.includes(
+                                          m.id,
+                                        )}
+                                        onChange={e => {
+                                          if (
+                                            e.target.checked &&
+                                            selectedCouncilModels.length >= 5
+                                          )
+                                            return;
+                                          setSelectedCouncilModels(prev =>
+                                            e.target.checked
+                                              ? [...prev, m.id]
+                                              : prev.filter(id => id !== m.id),
+                                          );
+                                        }}
+                                        className="rounded border-border"
+                                      />
+                                      <span className="text-[11px] text-foreground/80 group-hover:text-foreground truncate">
+                                        {m.name
+                                          .split(' ')
+                                          .slice(0, 2)
+                                          .join(' ')}
+                                      </span>
+                                    </label>
+                                  ))}
+                                </div>
                                 <Button
                                   size="sm"
-                                  className="w-full h-7 text-xs bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border-purple-500/30"
+                                  className="w-full h-7 text-xs bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border-purple-500/30"
                                   variant="outline"
                                   disabled={selectedCouncilModels.length < 2}
-                                  onClick={runCouncil}
+                                  onClick={() => {
+                                    runCouncil();
+                                    setShowAiDropdown(false);
+                                  }}
                                 >
-                                  Run Council
+                                  <Users className="h-3.5 w-3.5 mr-1" />
+                                  Run Council ({selectedCouncilModels.length}/5)
                                 </Button>
                               </div>
                             </div>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <p className="text-muted-foreground text-sm mt-1">
@@ -877,33 +904,21 @@ export function StockAnalyzer() {
               </CardContent>
             </Card>
 
-            {/* AI Analysis Panel */}
+            {/* Merged AI Section */}
             <AnimatePresence>
-              {showAiPanel && (
+              {(showAiPanel || showCouncilPanel) && (
                 <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
                 >
-                  <Card className="bg-gradient-to-br from-amber-500/5 to-yellow-500/5 border-amber-500/30">
+                  <Card className="bg-gradient-to-br from-amber-500/5 to-purple-500/5 border-amber-500/20">
                     <CardHeader className="pb-3">
                       <div className="flex items-center justify-between flex-wrap gap-2">
                         <CardTitle className="flex items-center gap-2 text-lg flex-wrap">
                           <Sparkles className="h-5 w-5 text-amber-500" />
-                          <span className="hidden sm:inline">
-                            AI Investment Analysis
-                          </span>
-                          <span className="sm:hidden">AI Analysis</span>
-
-                          {/* Show selected model as badge */}
-                          <Badge
-                            variant="outline"
-                            className="text-xs border-amber-500/30 text-amber-500"
-                          >
-                            {selectedModel.name}
-                          </Badge>
-
-                          {aiCacheInfo?.cached && (
+                          AI Analysis
+                          {aiActiveTab === 'insight' && aiCacheInfo?.cached && (
                             <Badge
                               variant="outline"
                               className="text-xs border-blue-500/30 text-blue-500"
@@ -913,23 +928,71 @@ export function StockAnalyzer() {
                             </Badge>
                           )}
                         </CardTitle>
-                        <div className="flex items-center gap-2">
-                          {aiAnalysis && !aiLoading && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => fetchAiAnalysis(true)}
-                              disabled={aiLoading}
-                              className="h-8 text-xs gap-1.5 border-blue-500/30 hover:border-blue-500/50 hover:bg-blue-500/10 text-blue-500"
-                            >
-                              <RefreshCw className="h-3.5 w-3.5" />
-                              Recalculate
-                            </Button>
+
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {/* Fancy tab switcher — only when both panels are active */}
+                          {showAiPanel && showCouncilPanel && (
+                            <div className="relative flex items-center bg-muted/40 rounded-lg p-0.5 gap-0">
+                              {(
+                                ['insight', 'council'] as (
+                                  | 'insight'
+                                  | 'council'
+                                )[]
+                              ).map(tab => (
+                                <button
+                                  key={tab}
+                                  onClick={() => setAiActiveTab(tab)}
+                                  className="relative px-3 py-1.5 text-xs font-medium rounded-md z-10 transition-colors"
+                                >
+                                  {aiActiveTab === tab && (
+                                    <motion.div
+                                      layoutId="ai-tab-bg"
+                                      className="absolute inset-0 bg-background rounded-md shadow-sm"
+                                      transition={{
+                                        type: 'spring',
+                                        stiffness: 400,
+                                        damping: 30,
+                                      }}
+                                    />
+                                  )}
+                                  <span
+                                    className={`relative z-10 ${
+                                      aiActiveTab === tab
+                                        ? 'text-foreground'
+                                        : 'text-muted-foreground'
+                                    }`}
+                                  >
+                                    {tab === 'insight'
+                                      ? '⚡ AI Insight'
+                                      : '🧠 AI Council'}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
                           )}
+
+                          {aiActiveTab === 'insight' &&
+                            aiAnalysis &&
+                            !aiLoading && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => fetchAiAnalysis(true)}
+                                disabled={aiLoading}
+                                className="h-8 text-xs gap-1.5 border-blue-500/30 hover:border-blue-500/50 hover:bg-blue-500/10 text-blue-500"
+                              >
+                                <RefreshCw className="h-3.5 w-3.5" />
+                                Recalculate
+                              </Button>
+                            )}
+
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => setShowAiPanel(false)}
+                            onClick={() => {
+                              setShowAiPanel(false);
+                              setShowCouncilPanel(false);
+                            }}
                             className="h-8 w-8 text-muted-foreground hover:text-foreground"
                           >
                             <X className="h-4 w-4" />
@@ -937,270 +1000,280 @@ export function StockAnalyzer() {
                         </div>
                       </div>
                     </CardHeader>
-                    <CardContent>
-                      {aiLoading && (
-                        <div className="flex items-center justify-center py-8">
-                          <div className="flex flex-col items-center gap-3">
-                            <Spinner size="lg" className="text-amber-500" />
-                            <p className="text-sm text-muted-foreground">
-                              Analyzing {stockData.symbol}...
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                      {aiError && (
-                        <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4">
-                          <p className="text-destructive text-sm">{aiError}</p>
-                        </div>
-                      )}
-                      {aiAnalysis && !aiLoading && (
-                        <div className="space-y-6">
-                          {/* Score and Prediction Header */}
-                          <div className="flex items-center justify-between gap-4 flex-wrap">
-                            {/* Score Circle */}
-                            <div className="flex items-center gap-4">
-                              <div
-                                className={`relative flex items-center justify-center w-20 h-20 rounded-full ${getScoreColor(aiAnalysis.score).bg}/20 border-2 ${getScoreColor(aiAnalysis.score).text.replace('text-', 'border-')}`}
-                              >
-                                <span
-                                  className={`text-3xl font-bold font-mono ${getScoreColor(aiAnalysis.score).text}`}
-                                >
-                                  {aiAnalysis.score}
-                                </span>
-                                <span
-                                  className={`absolute -bottom-1 text-xs font-medium ${getScoreColor(aiAnalysis.score).text}`}
-                                >
-                                  /10
-                                </span>
-                              </div>
-                              <div>
-                                <p className="text-sm text-muted-foreground">
-                                  Investment Score
-                                </p>
-                                <p
-                                  className={`text-lg font-semibold ${getScoreColor(aiAnalysis.score).text}`}
-                                >
-                                  {getScoreColor(aiAnalysis.score).label}
-                                </p>
-                              </div>
-                            </div>
 
-                            {/* Prediction Badge */}
-                            <div className="flex flex-col items-end gap-1">
-                              <div
-                                className={`flex items-center gap-2 px-4 py-2 rounded-lg ${
-                                  aiAnalysis.prediction === 'UP'
-                                    ? 'bg-green-500/10 border border-green-500/30'
-                                    : aiAnalysis.prediction === 'DOWN'
-                                      ? 'bg-red-500/10 border border-red-500/30'
-                                      : 'bg-yellow-500/10 border border-yellow-500/30'
-                                }`}
-                              >
-                                {aiAnalysis.prediction === 'UP' ? (
-                                  <ArrowUpCircle className="h-5 w-5 text-green-500" />
-                                ) : aiAnalysis.prediction === 'DOWN' ? (
-                                  <ArrowDownCircle className="h-5 w-5 text-red-500" />
-                                ) : (
-                                  <Minus className="h-5 w-5 text-yellow-500" />
-                                )}
-                                <span
-                                  className={`text-lg font-bold ${
-                                    aiAnalysis.prediction === 'UP'
-                                      ? 'text-green-500'
-                                      : aiAnalysis.prediction === 'DOWN'
-                                        ? 'text-red-500'
-                                        : 'text-yellow-500'
+                    <CardContent>
+                      {/* AI Insight tab content */}
+                      {showAiPanel &&
+                        (!showCouncilPanel || aiActiveTab === 'insight') && (
+                          <div>
+                            {aiLoading && (
+                              <div className="flex items-center justify-center py-8">
+                                <div className="flex flex-col items-center gap-3">
+                                  <Spinner
+                                    size="lg"
+                                    className="text-amber-500"
+                                  />
+                                  <p className="text-sm text-muted-foreground">
+                                    Analyzing {stockData.symbol}...
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+                            {aiError && (
+                              <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4">
+                                <p className="text-destructive text-sm">
+                                  {aiError}
+                                </p>
+                              </div>
+                            )}
+                            {aiAnalysis && !aiLoading && (
+                              <div className="space-y-6">
+                                {/* Score and Prediction Header */}
+                                <div className="flex items-center justify-between gap-4 flex-wrap">
+                                  <div className="flex items-center gap-4">
+                                    <div
+                                      className={`relative flex items-center justify-center w-20 h-20 rounded-full ${getScoreColor(aiAnalysis.score).bg}/20 border-2 ${getScoreColor(aiAnalysis.score).text.replace('text-', 'border-')}`}
+                                    >
+                                      <span
+                                        className={`text-3xl font-bold font-mono ${getScoreColor(aiAnalysis.score).text}`}
+                                      >
+                                        {aiAnalysis.score}
+                                      </span>
+                                      <span
+                                        className={`absolute -bottom-1 text-xs font-medium ${getScoreColor(aiAnalysis.score).text}`}
+                                      >
+                                        /10
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <p className="text-sm text-muted-foreground">
+                                        Investment Score
+                                      </p>
+                                      <p
+                                        className={`text-lg font-semibold ${getScoreColor(aiAnalysis.score).text}`}
+                                      >
+                                        {getScoreColor(aiAnalysis.score).label}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex flex-col items-end gap-1">
+                                    <div
+                                      className={`flex items-center gap-2 px-4 py-2 rounded-lg ${
+                                        aiAnalysis.prediction === 'UP'
+                                          ? 'bg-green-500/10 border border-green-500/30'
+                                          : aiAnalysis.prediction === 'DOWN'
+                                            ? 'bg-red-500/10 border border-red-500/30'
+                                            : 'bg-yellow-500/10 border border-yellow-500/30'
+                                      }`}
+                                    >
+                                      {aiAnalysis.prediction === 'UP' ? (
+                                        <ArrowUpCircle className="h-5 w-5 text-green-500" />
+                                      ) : aiAnalysis.prediction === 'DOWN' ? (
+                                        <ArrowDownCircle className="h-5 w-5 text-red-500" />
+                                      ) : (
+                                        <Minus className="h-5 w-5 text-yellow-500" />
+                                      )}
+                                      <span
+                                        className={`text-lg font-bold ${
+                                          aiAnalysis.prediction === 'UP'
+                                            ? 'text-green-500'
+                                            : aiAnalysis.prediction === 'DOWN'
+                                              ? 'text-red-500'
+                                              : 'text-yellow-500'
+                                        }`}
+                                      >
+                                        {aiAnalysis.prediction === 'UP'
+                                          ? 'BUY'
+                                          : aiAnalysis.prediction === 'DOWN'
+                                            ? 'SELL'
+                                            : 'HOLD'}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                      Confidence:{' '}
+                                      <span className="font-mono font-medium">
+                                        {aiAnalysis.confidence}%
+                                      </span>
+                                    </p>
+                                  </div>
+                                </div>
+
+                                {/* Analysis Reasons */}
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                    <p className="text-sm font-medium text-foreground">
+                                      Analysis & Reasoning
+                                    </p>
+                                  </div>
+                                  <ul className="space-y-1.5 pl-4">
+                                    {aiAnalysis.reasons.map(
+                                      (reason: string, index: number) => (
+                                        <li
+                                          key={index}
+                                          className="text-sm text-foreground/80 flex items-start gap-2"
+                                        >
+                                          <span className="text-amber-500 mt-1">
+                                            •
+                                          </span>
+                                          <span>{reason}</span>
+                                        </li>
+                                      ),
+                                    )}
+                                  </ul>
+                                </div>
+
+                                {/* BUY STRATEGY */}
+                                <div
+                                  className={`p-4 rounded-lg border ${
+                                    aiAnalysis.bottomFishing.recommended
+                                      ? 'bg-cyan-500/5 border-cyan-500/30'
+                                      : 'bg-muted/20 border-border/30'
                                   }`}
                                 >
-                                  {aiAnalysis.prediction}
-                                </span>
-                              </div>
-                              <p className="text-xs text-muted-foreground">
-                                Confidence:{' '}
-                                <span className="font-mono font-medium">
-                                  {aiAnalysis.confidence}%
-                                </span>
-                              </p>
-                            </div>
-                          </div>
+                                  <div className="flex items-center gap-2 mb-3">
+                                    <TrendingUp
+                                      className={`h-4 w-4 ${aiAnalysis.bottomFishing.recommended ? 'text-cyan-500' : 'text-muted-foreground'}`}
+                                    />
+                                    <p className="text-sm font-medium text-foreground">
+                                      BUY STRATEGY
+                                    </p>
+                                    {aiAnalysis.bottomFishing.recommended && (
+                                      <Badge
+                                        variant="outline"
+                                        className="text-xs border-cyan-500/50 text-cyan-500"
+                                      >
+                                        Recommended
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div className="flex items-center gap-2">
+                                      <Target className="h-4 w-4 text-muted-foreground" />
+                                      <span className="text-xs text-muted-foreground">
+                                        Entry Price:
+                                      </span>
+                                      <span className="text-sm font-mono font-medium text-foreground">
+                                        {aiAnalysis.bottomFishing.targetPrice
+                                          ? `$${aiAnalysis.bottomFishing.targetPrice.toFixed(2)}`
+                                          : 'N/A'}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <Clock className="h-4 w-4 text-muted-foreground" />
+                                      <span className="text-xs text-muted-foreground">
+                                        Timing:
+                                      </span>
+                                      <span className="text-sm font-medium text-foreground">
+                                        {aiAnalysis.bottomFishing.timing}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <p className="text-xs text-muted-foreground mt-2 italic">
+                                    {aiAnalysis.bottomFishing.rationale}
+                                  </p>
+                                </div>
 
-                          {/* Analysis Reasons */}
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2">
-                              <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                              <p className="text-sm font-medium text-foreground">
-                                Analysis & Reasoning
-                              </p>
-                            </div>
-                            <ul className="space-y-1.5 pl-4">
-                              {aiAnalysis.reasons.map(
-                                (reason: string, index: number) => (
-                                  <li
-                                    key={index}
-                                    className="text-sm text-foreground/80 flex items-start gap-2"
-                                  >
-                                    <span className="text-amber-500 mt-1">
-                                      •
-                                    </span>
-                                    <span>{reason}</span>
-                                  </li>
-                                ),
-                              )}
-                            </ul>
-                          </div>
+                                {/* SELL STRATEGY */}
+                                <div className="p-4 rounded-lg bg-green-500/5 border border-green-500/30">
+                                  <div className="flex items-center gap-2 mb-3">
+                                    <TrendingDown className="h-4 w-4 text-green-500" />
+                                    <p className="text-sm font-medium text-foreground">
+                                      SELL STRATEGY
+                                    </p>
+                                  </div>
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                                    <div className="text-center p-3 rounded-lg bg-green-500/10">
+                                      <p className="text-xs text-muted-foreground mb-1">
+                                        Expected Rise
+                                      </p>
+                                      <p className="text-lg font-bold font-mono text-green-500">
+                                        +
+                                        {aiAnalysis.priceTarget.expectedRise.toFixed(
+                                          1,
+                                        )}
+                                        %
+                                      </p>
+                                    </div>
+                                    <div className="text-center p-3 rounded-lg bg-green-500/10">
+                                      <p className="text-xs text-muted-foreground mb-1">
+                                        Target Price
+                                      </p>
+                                      <p className="text-lg font-bold font-mono text-green-500">
+                                        $
+                                        {aiAnalysis.priceTarget.targetPrice.toFixed(
+                                          2,
+                                        )}
+                                      </p>
+                                    </div>
+                                    <div className="text-center p-3 rounded-lg bg-green-500/10">
+                                      <p className="text-xs text-muted-foreground mb-1">
+                                        Timeframe
+                                      </p>
+                                      <p className="text-sm font-semibold text-foreground">
+                                        {aiAnalysis.priceTarget.timeframe}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-start gap-2 p-2 rounded bg-amber-500/10 border border-amber-500/20">
+                                    <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                                    <p className="text-xs text-foreground/80">
+                                      <span className="font-medium">
+                                        Exit Strategy:
+                                      </span>{' '}
+                                      {aiAnalysis.priceTarget.exitStrategy}
+                                    </p>
+                                  </div>
+                                </div>
 
-                          {/* Bottom Fishing Section */}
-                          <div
-                            className={`p-4 rounded-lg border ${
-                              aiAnalysis.bottomFishing.recommended
-                                ? 'bg-cyan-500/5 border-cyan-500/30'
-                                : 'bg-muted/20 border-border/30'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 mb-3">
-                              <TrendingUp
-                                className={`h-4 w-4 ${aiAnalysis.bottomFishing.recommended ? 'text-cyan-500' : 'text-muted-foreground'}`}
-                              />
-                              <p className="text-sm font-medium text-foreground">
-                                BUY STRATEGY
-                              </p>
-                              {aiAnalysis.bottomFishing.recommended && (
-                                <Badge
-                                  variant="outline"
-                                  className="text-xs border-cyan-500/50 text-cyan-500"
-                                >
-                                  Recommended
-                                </Badge>
-                              )}
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div className="flex items-center gap-2">
-                                <Target className="h-4 w-4 text-muted-foreground" />
-                                <span className="text-xs text-muted-foreground">
-                                  Entry Price:
-                                </span>
-                                <span className="text-sm font-mono font-medium text-foreground">
-                                  {aiAnalysis.bottomFishing.targetPrice
-                                    ? `$${aiAnalysis.bottomFishing.targetPrice.toFixed(2)}`
-                                    : 'N/A'}
-                                </span>
+                                {/* Risk Factors */}
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <AlertTriangle className="w-4 h-4 text-red-500" />
+                                    <p className="text-sm font-medium text-foreground">
+                                      Risk Factors to Watch
+                                    </p>
+                                  </div>
+                                  <ul className="space-y-1.5 pl-4">
+                                    {aiAnalysis.riskFactors.map(
+                                      (factor: string, index: number) => (
+                                        <li
+                                          key={index}
+                                          className="text-sm text-foreground/80 flex items-start gap-2"
+                                        >
+                                          <span className="text-red-500 mt-1">
+                                            •
+                                          </span>
+                                          <span>{factor}</span>
+                                        </li>
+                                      ),
+                                    )}
+                                  </ul>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <Clock className="h-4 w-4 text-muted-foreground" />
-                                <span className="text-xs text-muted-foreground">
-                                  Timing:
-                                </span>
-                                <span className="text-sm font-medium text-foreground">
-                                  {aiAnalysis.bottomFishing.timing}
-                                </span>
-                              </div>
-                            </div>
-                            <p className="text-xs text-muted-foreground mt-2 italic">
-                              {aiAnalysis.bottomFishing.rationale}
+                            )}
+                            <p className="text-xs text-muted-foreground mt-4 pt-4 border-t border-border/30">
+                              This analysis is generated by AI and should not be
+                              considered financial advice. Always do your own
+                              research before making investment decisions.
                             </p>
                           </div>
+                        )}
 
-                          {/* Price Target Section */}
-                          <div className="p-4 rounded-lg bg-green-500/5 border border-green-500/30">
-                            <div className="flex items-center gap-2 mb-3">
-                              <TrendingDown className="h-4 w-4 text-green-500" />
-                              <p className="text-sm font-medium text-foreground">
-                                SELL STRATEGY
-                              </p>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-                              <div className="text-center p-3 rounded-lg bg-green-500/10">
-                                <p className="text-xs text-muted-foreground mb-1">
-                                  Expected Rise
-                                </p>
-                                <p className="text-lg font-bold font-mono text-green-500">
-                                  +
-                                  {aiAnalysis.priceTarget.expectedRise.toFixed(
-                                    1,
-                                  )}
-                                  %
-                                </p>
-                              </div>
-                              <div className="text-center p-3 rounded-lg bg-green-500/10">
-                                <p className="text-xs text-muted-foreground mb-1">
-                                  Target Price
-                                </p>
-                                <p className="text-lg font-bold font-mono text-green-500">
-                                  $
-                                  {aiAnalysis.priceTarget.targetPrice.toFixed(
-                                    2,
-                                  )}
-                                </p>
-                              </div>
-                              <div className="text-center p-3 rounded-lg bg-green-500/10">
-                                <p className="text-xs text-muted-foreground mb-1">
-                                  Timeframe
-                                </p>
-                                <p className="text-sm font-semibold text-foreground">
-                                  {aiAnalysis.priceTarget.timeframe}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-start gap-2 p-2 rounded bg-amber-500/10 border border-amber-500/20">
-                              <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
-                              <p className="text-xs text-foreground/80">
-                                <span className="font-medium">
-                                  Exit Strategy:
-                                </span>{' '}
-                                {aiAnalysis.priceTarget.exitStrategy}
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* Risk Factors */}
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2">
-                              <AlertTriangle className="w-4 h-4 text-red-500" />
-                              <p className="text-sm font-medium text-foreground">
-                                Risk Factors to Watch
-                              </p>
-                            </div>
-                            <ul className="space-y-1.5 pl-4">
-                              {aiAnalysis.riskFactors.map(
-                                (factor: string, index: number) => (
-                                  <li
-                                    key={index}
-                                    className="text-sm text-foreground/80 flex items-start gap-2"
-                                  >
-                                    <span className="text-red-500 mt-1">•</span>
-                                    <span>{factor}</span>
-                                  </li>
-                                ),
-                              )}
-                            </ul>
-                          </div>
-                        </div>
-                      )}
-                      <p className="text-xs text-muted-foreground mt-4 pt-4 border-t border-border/30">
-                        This analysis is generated by AI and should not be
-                        considered financial advice. Always do your own research
-                        before making investment decisions.
-                      </p>
+                      {/* AI Council tab content */}
+                      {showCouncilPanel &&
+                        (!showAiPanel || aiActiveTab === 'council') &&
+                        councilResults.length > 0 && (
+                          <AiCouncilPanel
+                            results={councilResults}
+                            summaryAnalysis={councilSummaryAnalysis}
+                            summaryLoading={councilSummaryLoading}
+                            summaryError={councilSummaryError}
+                          />
+                        )}
                     </CardContent>
                   </Card>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* AI Council Panel */}
-            <AnimatePresence>
-              {showCouncilPanel && councilResults.length > 0 && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                >
-                  <AiCouncilPanel
-                    results={councilResults}
-                    summary={councilSummary}
-                    summaryLoading={councilSummaryLoading}
-                    summaryError={councilSummaryError}
-                  />
                 </motion.div>
               )}
             </AnimatePresence>
