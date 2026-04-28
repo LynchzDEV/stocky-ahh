@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Sparkles,
@@ -246,13 +246,12 @@ export function AiCouncilPanel({
 }: AiCouncilPanelProps) {
   const [activeTab, setActiveTab] = useState(results[0]?.modelId ?? 'summary');
 
-  const activeResult = results.find(r => r.modelId === activeTab);
+  const effectiveTab =
+    activeTab === 'summary' || results.find(r => r.modelId === activeTab)
+      ? activeTab
+      : (results[0]?.modelId ?? 'summary');
 
-  useEffect(() => {
-    if (results.length > 0 && !results.find(r => r.modelId === activeTab)) {
-      setActiveTab(results[0].modelId);
-    }
-  }, [results, activeTab]);
+  const activeResult = results.find(r => r.modelId === effectiveTab);
 
   return (
     <div className="space-y-4">
@@ -264,12 +263,12 @@ export function AiCouncilPanel({
             onClick={() => setActiveTab(r.modelId)}
             className={cn(
               'relative px-3 py-2 text-xs font-medium whitespace-nowrap transition-colors shrink-0',
-              activeTab === r.modelId
+              effectiveTab === r.modelId
                 ? 'text-foreground'
                 : 'text-muted-foreground hover:text-foreground/70',
             )}
           >
-            {activeTab === r.modelId && (
+            {effectiveTab === r.modelId && (
               <motion.div
                 layoutId="council-tab-indicator"
                 className="absolute inset-0 bg-purple-500/10 border-b-2 border-purple-500 rounded-t"
@@ -310,12 +309,12 @@ export function AiCouncilPanel({
             onClick={() => setActiveTab('summary')}
             className={cn(
               'relative px-3 py-2 text-xs font-medium whitespace-nowrap transition-colors shrink-0',
-              activeTab === 'summary'
+              effectiveTab === 'summary'
                 ? 'text-foreground'
                 : 'text-muted-foreground hover:text-foreground/70',
             )}
           >
-            {activeTab === 'summary' && (
+            {effectiveTab === 'summary' && (
               <motion.div
                 layoutId="council-tab-indicator"
                 className="absolute inset-0 bg-amber-500/10 border-b-2 border-amber-500 rounded-t"
@@ -354,14 +353,14 @@ export function AiCouncilPanel({
       {/* Tab content */}
       <AnimatePresence mode="wait">
         <motion.div
-          key={activeTab}
+          key={effectiveTab}
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -6 }}
           transition={{ duration: 0.15 }}
         >
           {/* Per-model tab */}
-          {activeTab !== 'summary' && activeResult && (
+          {effectiveTab !== 'summary' && activeResult && (
             <>
               {activeResult.loading && (
                 <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
@@ -383,7 +382,7 @@ export function AiCouncilPanel({
           )}
 
           {/* Summary tab */}
-          {activeTab === 'summary' && (
+          {effectiveTab === 'summary' && (
             <>
               {summaryLoading && (
                 <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
