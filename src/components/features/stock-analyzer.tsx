@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search,
@@ -179,13 +180,17 @@ export function StockAnalyzer() {
     null,
   );
   const [showCouncilPanel, setShowCouncilPanel] = useState(false);
+  const [customCouncilInput, setCustomCouncilInput] = useState('');
 
   // Unified AI dropdown
   const [showAiDropdown, setShowAiDropdown] = useState(false);
   const [aiActiveTab, setAiActiveTab] = useState<'insight' | 'council'>(
     'insight',
   );
-  const aiDropdownRef = useRef<HTMLDivElement>(null);
+  const aiButtonRef = useRef<HTMLButtonElement>(null);
+  const aiPanelRef = useRef<HTMLDivElement>(null);
+  const [aiDropdownPos, setAiDropdownPos] = useState({ top: 0, left: 0 });
+  const [isMounted, setIsMounted] = useState(false);
   const settingsPanelRef = useRef<HTMLDivElement>(null);
 
   // Technical indicators state
@@ -230,18 +235,33 @@ export function StockAnalyzer() {
     if (known) setSelectedModel(known);
   }, [defaultAI.id]);
 
+  useEffect(() => { setIsMounted(true); }, []);
+
   useEffect(() => {
     if (!showAiDropdown) return;
     const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
       if (
-        aiDropdownRef.current &&
-        !aiDropdownRef.current.contains(e.target as Node)
+        !aiButtonRef.current?.contains(target) &&
+        !aiPanelRef.current?.contains(target)
       ) {
         setShowAiDropdown(false);
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
+  }, [showAiDropdown]);
+
+  useEffect(() => {
+    if (!showAiDropdown) return;
+    const handler = () => {
+      if (aiButtonRef.current) {
+        const rect = aiButtonRef.current.getBoundingClientRect();
+        setAiDropdownPos({ top: rect.bottom + 8, left: Math.max(0, rect.right - 288) });
+      }
+    };
+    window.addEventListener('scroll', handler, true);
+    return () => window.removeEventListener('scroll', handler, true);
   }, [showAiDropdown]);
 
   useEffect(() => {
@@ -334,9 +354,10 @@ export function StockAnalyzer() {
   const runCouncil = useCallback(async () => {
     if (!stockData || selectedCouncilModels.length === 0) return;
 
-    const modelsToRun = AI_MODELS.filter(m =>
-      selectedCouncilModels.includes(m.id),
-    );
+    const modelsToRun = selectedCouncilModels.map(id => {
+      const known = AI_MODELS.find(m => m.id === id);
+      return known ?? { id, name: id, provider: 'Custom', badge: undefined };
+    });
 
     const initial: CouncilResult[] = modelsToRun.map(m => ({
       modelId: m.id,
@@ -735,11 +756,22 @@ export function StockAnalyzer() {
                       </Badge>
 
                       {/* Unified AI Button */}
-                      <div className="relative ml-2" ref={aiDropdownRef}>
+                      <div className="ml-2">
                         <Button
+                          ref={aiButtonRef}
                           variant="outline"
                           size="sm"
-                          onClick={() => setShowAiDropdown(v => !v)}
+                          onClick={() => {
+                            if (!showAiDropdown && aiButtonRef.current) {
+                              const rect =
+                                aiButtonRef.current.getBoundingClientRect();
+                              setAiDropdownPos({
+                                top: rect.bottom + 8,
+                                left: Math.max(0, rect.right - 288),
+                              });
+                            }
+                            setShowAiDropdown(v => !v);
+                          }}
                           disabled={!stockData}
                           className="gap-1.5 bg-gradient-to-r from-amber-500/10 to-purple-500/10 border-amber-500/30 hover:border-amber-500/50 text-amber-400"
                         >
@@ -748,8 +780,17 @@ export function StockAnalyzer() {
                           <ChevronDown className="h-3 w-3" />
                         </Button>
 
-                        {showAiDropdown && (
-                          <div className="absolute top-10 right-0 z-50 w-72 bg-background border border-border rounded-lg shadow-lg p-3 space-y-3">
+                        {isMounted && showAiDropdown && createPortal(
+                          <div
+                            ref={aiPanelRef}
+                            className="w-72 bg-background border border-border rounded-lg shadow-lg p-3 space-y-3"
+                            style={{
+                              position: 'fixed',
+                              zIndex: 9999,
+                              top: aiDropdownPos.top,
+                              left: aiDropdownPos.left,
+                            }}
+                          >
                             {/* Model selection */}
                             <div>
                               <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
@@ -860,6 +901,85 @@ export function StockAnalyzer() {
                                     </label>
                                   ))}
                                 </div>
+
+                                {/* Custom council model input */}
+                                <div className="flex gap-1 mt-1">
+                                  <Input
+                                    placeholder="custom model id..."
+                                    value={customCouncilInput}
+                                    onChange={e =>
+                                      setCustomCouncilInput(e.target.value)
+                                    }
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        const id = customCouncilInput.trim();
+                                        if (
+                                          id &&
+                                          selectedCouncilModels.length < 5 &&
+                                          !selectedCouncilModels.includes(id)
+                                        ) {
+                                          setSelectedCouncilModels(prev => [
+                                            ...prev,
+                                            id,
+                                          ]);
+                                          setCustomCouncilInput('');
+                                        }
+                                      }
+                                    }}
+                                    className="h-7 text-xs flex-1 border-purple-500/20 bg-transparent placeholder:text-muted-foreground/50"
+                                  />
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2 text-xs border-purple-500/30 text-purple-300"
+                                    disabled={
+                                      !customCouncilInput.trim() ||
+                                      selectedCouncilModels.length >= 5 ||
+                                      selectedCouncilModels.includes(
+                                        customCouncilInput.trim(),
+                                      )
+                                    }
+                                    onClick={() => {
+                                      const id = customCouncilInput.trim();
+                                      if (id) {
+                                        setSelectedCouncilModels(prev => [
+                                          ...prev,
+                                          id,
+                                        ]);
+                                        setCustomCouncilInput('');
+                                      }
+                                    }}
+                                  >
+                                    Add
+                                  </Button>
+                                </div>
+
+                                {/* Show added custom models */}
+                                {selectedCouncilModels
+                                  .filter(
+                                    id => !AI_MODELS.find(m => m.id === id),
+                                  )
+                                  .map(id => (
+                                    <div
+                                      key={id}
+                                      className="flex items-center justify-between px-2 py-1 rounded bg-purple-500/10 border border-purple-500/20"
+                                    >
+                                      <span className="text-[11px] text-purple-300 truncate flex-1">
+                                        {id}
+                                      </span>
+                                      <button
+                                        onClick={() =>
+                                          setSelectedCouncilModels(prev =>
+                                            prev.filter(x => x !== id),
+                                          )
+                                        }
+                                        className="text-muted-foreground hover:text-foreground ml-1 shrink-0"
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </button>
+                                    </div>
+                                  ))}
+
                                 <Button
                                   size="sm"
                                   className="w-full h-7 text-xs bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border-purple-500/30"
@@ -875,7 +995,8 @@ export function StockAnalyzer() {
                                 </Button>
                               </div>
                             </div>
-                          </div>
+                          </div>,
+                          document.body
                         )}
                       </div>
                     </div>
