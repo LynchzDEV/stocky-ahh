@@ -35,7 +35,7 @@ import { Badge } from '@/components/ui/badge';
 import { CandlestickChart } from './candlestick-chart';
 import { StockNews } from './stock-news';
 import { AiCouncilPanel } from './ai-council-panel';
-import type { CouncilResult } from './ai-council-panel';
+import type { CouncilResult, CouncilRole } from './ai-council-panel';
 import { validateSymbol, RateLimiter } from '@/lib/validation';
 import type { StockData } from '@/lib/types';
 import { Spinner } from '@/components/ui/spinner';
@@ -334,14 +334,20 @@ export function StockAnalyzer() {
   const runCouncil = useCallback(async () => {
     if (!stockData || selectedCouncilModels.length === 0) return;
 
-    const modelsToRun = selectedCouncilModels.map(id => {
+    const ROLES: CouncilRole[] = ['technical', 'fundamental', 'sentiment', 'contrarian', 'risk'];
+
+    const modelsToRun = selectedCouncilModels.map((id, idx) => {
       const known = AI_MODELS.find(m => m.id === id);
-      return known ?? { id, name: id, provider: 'Custom', badge: undefined };
+      return {
+        ...(known ?? { id, name: id, provider: 'Custom', badge: undefined }),
+        councilRole: ROLES[idx % ROLES.length],
+      };
     });
 
     const initial: CouncilResult[] = modelsToRun.map(m => ({
       modelId: m.id,
       modelName: m.name,
+      councilRole: m.councilRole,
       analysis: null,
       loading: true,
       error: null,
@@ -360,8 +366,9 @@ export function StockAnalyzer() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             symbol: stockData.symbol,
-            forceRefresh: false,
+            forceRefresh: true,
             model: model.id,
+            councilRole: model.councilRole,
             stockData: {
               name: stockData.name,
               currentPrice: stockData.currentPrice,
@@ -387,6 +394,7 @@ export function StockAnalyzer() {
         return {
           modelId: model.id,
           modelName: model.name,
+          councilRole: model.councilRole,
           analysis: data.analysis,
         };
       } catch (err) {
@@ -453,6 +461,7 @@ export function StockAnalyzer() {
             symbol: stockData.symbol,
             forceRefresh: true,
             model: modelId,
+            councilRole: model.councilRole,
             stockData: {
               name: stockData.name,
               currentPrice: stockData.currentPrice,

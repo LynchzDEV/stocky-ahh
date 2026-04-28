@@ -38,9 +38,20 @@ export interface ModelAnalysis {
   riskFactors: string[];
 }
 
+export type CouncilRole = 'technical' | 'fundamental' | 'sentiment' | 'contrarian' | 'risk';
+
+export const COUNCIL_ROLE_LABELS: Record<CouncilRole, { label: string; short: string; color: string }> = {
+  technical:   { label: 'Technical Analyst',    short: 'Technical',   color: 'text-blue-400' },
+  fundamental: { label: 'Fundamental Analyst',  short: 'Fundamental', color: 'text-emerald-400' },
+  sentiment:   { label: 'Sentiment Analyst',    short: 'Sentiment',   color: 'text-violet-400' },
+  contrarian:  { label: 'Contrarian Analyst',   short: 'Contrarian',  color: 'text-orange-400' },
+  risk:        { label: 'Risk Manager',          short: 'Risk Mgr',    color: 'text-red-400' },
+};
+
 export interface CouncilResult {
   modelId: string;
   modelName: string;
+  councilRole?: CouncilRole;
   analysis: ModelAnalysis | null;
   loading: boolean;
   error: string | null;
@@ -256,8 +267,51 @@ export function AiCouncilPanel({
 
   const activeResult = results.find(r => r.modelId === effectiveTab);
 
+  const completed = results.filter(r => !r.loading && !r.error && r.analysis);
+  const votes = { BUY: 0, SELL: 0, HOLD: 0 };
+  let totalScore = 0;
+  let totalConfidence = 0;
+  completed.forEach(r => {
+    const label = getPredictionLabel(r.analysis!.prediction) as 'BUY' | 'SELL' | 'HOLD';
+    votes[label]++;
+    totalScore += r.analysis!.score;
+    totalConfidence += r.analysis!.confidence;
+  });
+  const avgScore = completed.length > 0 ? (totalScore / completed.length).toFixed(1) : null;
+  const avgConf = completed.length > 0 ? Math.round(totalConfidence / completed.length) : null;
+
   return (
     <div className="space-y-4">
+      {/* Vote distribution header */}
+      {completed.length > 0 && (
+        <div className="flex items-center gap-3 flex-wrap px-1">
+          {votes.BUY > 0 && (
+            <span className="flex items-center gap-1 text-xs font-semibold text-green-400">
+              <ArrowUpCircle className="h-3.5 w-3.5" />
+              {votes.BUY} BUY
+            </span>
+          )}
+          {votes.HOLD > 0 && (
+            <span className="flex items-center gap-1 text-xs font-semibold text-yellow-400">
+              <Minus className="h-3.5 w-3.5" />
+              {votes.HOLD} HOLD
+            </span>
+          )}
+          {votes.SELL > 0 && (
+            <span className="flex items-center gap-1 text-xs font-semibold text-red-400">
+              <ArrowDownCircle className="h-3.5 w-3.5" />
+              {votes.SELL} SELL
+            </span>
+          )}
+          <span className="text-[10px] text-muted-foreground ml-auto">
+            avg score <span className="font-mono font-semibold text-foreground">{avgScore}</span>
+            {' · '}
+            <span className="font-mono font-semibold text-foreground">{avgConf}%</span> conf
+            {' · '}
+            {completed.length}/{results.length} done
+          </span>
+        </div>
+      )}
       {/* Tab bar */}
       <div className="relative flex gap-0.5 border-b border-white/10 overflow-x-auto pb-0">
         {results.map(r => (
@@ -301,7 +355,14 @@ export function AiCouncilPanel({
                   </span>
                 </>
               )}
-              {r.modelName.split(' ').slice(0, 2).join(' ')}
+              <span className="flex flex-col items-start leading-none gap-0.5">
+                <span>{r.modelName.split(' ').slice(0, 2).join(' ')}</span>
+                {r.councilRole && (
+                  <span className={cn('text-[9px] font-normal', COUNCIL_ROLE_LABELS[r.councilRole].color)}>
+                    {COUNCIL_ROLE_LABELS[r.councilRole].short}
+                  </span>
+                )}
+              </span>
             </span>
           </button>
         ))}
