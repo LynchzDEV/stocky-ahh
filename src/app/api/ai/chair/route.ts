@@ -119,7 +119,9 @@ Current round stats:
 === FULL DEBATE TRANSCRIPT ===
 ${transcriptText}
 ${forced ? `
-Synthesize the council's collective judgment into a definitive verdict. Base it on the strongest arguments and clearest evidence in the transcript. If significant disagreement remains unresolved, set requestExtension: true and explain what specific question more rounds would settle.` : ''}
+Synthesize the council's collective judgment into a definitive verdict based on the strongest arguments in the transcript. You MUST populate "verdict" regardless of whether disagreement remains.
+
+"requestExtension" is SEPARATE from the verdict — it is an additional signal indicating whether 2 more debate rounds would meaningfully change the outcome. Set it to true only if a specific unresolved question exists that more rounds could settle. The verdict is always required.` : ''}
 Respond with ONLY valid JSON matching this schema:
 
 ${schema}`;

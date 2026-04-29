@@ -241,6 +241,26 @@ export function useDebate() {
             return;
           }
 
+          // Chair returned shouldStop:false or missing verdict at forced round — use average fallback
+          if (forced) {
+            const fallbackVerdict = averageAnalyses(
+              latestRoundEntries.map(e => e.analysis),
+              stockData.currentPrice,
+            );
+            const dissenters = computeDissenters(newTranscript, fallbackVerdict);
+            const extensionRequested = !!chairData.requestExtension;
+            setState(prev => ({
+              ...prev,
+              phase: 'verdict',
+              verdict: fallbackVerdict,
+              stopReason: 'max_rounds',
+              dissenters,
+              extensionRequested,
+              extensionRationale: extensionRequested ? (chairData.extensionRationale ?? null) : null,
+            }));
+            return;
+          }
+
           directivesRef.current = chairData.analystDirectives;
           setState(prev => ({ ...prev, phase: 'round' }));
         } catch (err) {
@@ -264,6 +284,21 @@ export function useDebate() {
           console.error('Chair failed, using fallback:', err);
           return;
         }
+      }
+
+      // Loop exhausted without verdict (chair never stopped at forced round) — average fallback
+      const lastEntries = transcriptRef.current.filter(e => e.round === toRound);
+      if (lastEntries.length > 0) {
+        const fallback = averageAnalyses(lastEntries.map(e => e.analysis), stockData.currentPrice);
+        setState(prev => ({
+          ...prev,
+          phase: 'verdict',
+          verdict: fallback,
+          stopReason: 'max_rounds',
+          dissenters: computeDissenters(transcriptRef.current, fallback),
+          extensionRequested: false,
+          extensionRationale: null,
+        }));
       }
     },
     [],
