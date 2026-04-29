@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
         { role: 'system', content: CHAIR_SYSTEM_PROMPT },
         { role: 'user', content: userPrompt },
       ],
-      maxOutputTokens: 1000,
+      maxOutputTokens: 1500,
       temperature: 0.3,
     });
 

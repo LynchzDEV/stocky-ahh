@@ -229,17 +229,14 @@ Provide your Round ${round} JSON analysis:`;
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      maxOutputTokens: 800,
+      maxOutputTokens: 1500,
       temperature: 0.7,
     });
 
-    let cleaned = text.trim();
-    if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7);
-    else if (cleaned.startsWith('```')) cleaned = cleaned.slice(3);
-    if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3);
-    cleaned = cleaned.trim();
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('No JSON object found in response');
 
-    const analysis = JSON.parse(cleaned);
+    const analysis = JSON.parse(jsonMatch[0]);
 
     if (
       typeof analysis.score !== 'number' ||
