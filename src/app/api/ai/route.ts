@@ -2,13 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { validateSymbol } from "@/lib/validation";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
-
-const ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query";
+import {
+  fetchRSI,
+  fetchMACD,
+  fetchCompanyOverview,
+  fetchNewsSentiment,
+  buildTechnicalSection,
+  buildFundamentalsSection,
+  buildNewsSection,
+  type RSIData,
+  type MACDData,
+  type CompanyOverview,
+  type NewsSentimentResult,
+} from "@/lib/alpha-vantage";
 
 // Cache configuration
 const CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour for AI analysis
-const ALPHA_VANTAGE_CACHE_MS = 15 * 60 * 1000; // 15 minutes for Alpha Vantage data
-const FUNDAMENTALS_CACHE_MS = 60 * 60 * 1000; // 1 hour for fundamentals (changes less often)
 
 interface CacheEntry {
   analysis: AIAnalysis;
@@ -36,9 +45,8 @@ interface AIAnalysis {
   riskFactors: string[];
 }
 
-// In-memory caches
+// In-memory cache for AI analysis results
 const analysisCache = new Map<string, CacheEntry>();
-const alphaVantageCache = new Map<string, { data: unknown; timestamp: number }>();
 
 type CouncilRole = 'technical' | 'fundamental' | 'sentiment' | 'contrarian' | 'risk';
 
@@ -119,230 +127,6 @@ Focus on:
 Your buy target price should be the price that offers acceptable risk/reward. Your sell target should be where risk/reward deteriorates.`,
 };
 
-// Alpha Vantage data interfaces
-interface RSIData {
-  value: number;
-  signal: string;
-}
-
-interface MACDData {
-  macd: number;
-  signal: number;
-  histogram: number;
-  trend: string;
-}
-
-interface CompanyOverview {
-  marketCap: string;
-  peRatio: string;
-  eps: string;
-  fiftyTwoWeekHigh: string;
-  fiftyTwoWeekLow: string;
-  dividendYield: string;
-  sector: string;
-  industry: string;
-}
-
-interface NewsSentiment {
-  title: string;
-  sentiment: string;
-  score: number;
-  source: string;
-  timeAgo: string;
-}
-
-// Helper to get cached Alpha Vantage data
-function getCachedData<T>(key: string, maxAge: number): T | null {
-  const cached = alphaVantageCache.get(key);
-  if (cached && Date.now() - cached.timestamp < maxAge) {
-    return cached.data as T;
-  }
-  return null;
-}
-
-// Helper to set cached data
-function setCachedData(key: string, data: unknown): void {
-  alphaVantageCache.set(key, { data, timestamp: Date.now() });
-}
-
-// Fetch RSI from Alpha Vantage
-async function fetchRSI(symbol: string, apiKey: string): Promise<RSIData | null> {
-  const cacheKey = `rsi_${symbol}`;
-  const cached = getCachedData<RSIData>(cacheKey, ALPHA_VANTAGE_CACHE_MS);
-  if (cached) return cached;
-
-  try {
-    const url = `${ALPHA_VANTAGE_BASE_URL}?function=RSI&symbol=${symbol}&interval=daily&time_period=14&series_type=close&apikey=${apiKey}`;
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data.Note || data.Information || !data["Technical Analysis: RSI"]) {
-      return null;
-    }
-
-    const rsiData = data["Technical Analysis: RSI"];
-    const latestDate = Object.keys(rsiData)[0];
-    const rsiValue = parseFloat(rsiData[latestDate].RSI);
-
-    let signal = "Neutral";
-    if (rsiValue >= 70) signal = "Overbought";
-    else if (rsiValue >= 60) signal = "Bullish";
-    else if (rsiValue <= 30) signal = "Oversold";
-    else if (rsiValue <= 40) signal = "Bearish";
-
-    const result: RSIData = { value: rsiValue, signal };
-    setCachedData(cacheKey, result);
-    return result;
-  } catch (error) {
-    console.error("Failed to fetch RSI:", error);
-    return null;
-  }
-}
-
-// Fetch MACD from Alpha Vantage
-async function fetchMACD(symbol: string, apiKey: string): Promise<MACDData | null> {
-  const cacheKey = `macd_${symbol}`;
-  const cached = getCachedData<MACDData>(cacheKey, ALPHA_VANTAGE_CACHE_MS);
-  if (cached) return cached;
-
-  try {
-    const url = `${ALPHA_VANTAGE_BASE_URL}?function=MACD&symbol=${symbol}&interval=daily&series_type=close&apikey=${apiKey}`;
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data.Note || data.Information || !data["Technical Analysis: MACD"]) {
-      return null;
-    }
-
-    const macdData = data["Technical Analysis: MACD"];
-    const latestDate = Object.keys(macdData)[0];
-    const latest = macdData[latestDate];
-
-    const macd = parseFloat(latest.MACD);
-    const signal = parseFloat(latest.MACD_Signal);
-    const histogram = parseFloat(latest.MACD_Hist);
-
-    let trend = "Neutral";
-    if (histogram > 0 && macd > signal) trend = "Bullish";
-    else if (histogram < 0 && macd < signal) trend = "Bearish";
-
-    const result: MACDData = { macd, signal, histogram, trend };
-    setCachedData(cacheKey, result);
-    return result;
-  } catch (error) {
-    console.error("Failed to fetch MACD:", error);
-    return null;
-  }
-}
-
-// Fetch Company Overview from Alpha Vantage
-async function fetchCompanyOverview(symbol: string, apiKey: string): Promise<CompanyOverview | null> {
-  const cacheKey = `overview_${symbol}`;
-  const cached = getCachedData<CompanyOverview>(cacheKey, FUNDAMENTALS_CACHE_MS);
-  if (cached) return cached;
-
-  try {
-    const url = `${ALPHA_VANTAGE_BASE_URL}?function=OVERVIEW&symbol=${symbol}&apikey=${apiKey}`;
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data.Note || data.Information || !data.Symbol) {
-      return null;
-    }
-
-    const result: CompanyOverview = {
-      marketCap: formatMarketCap(data.MarketCapitalization),
-      peRatio: data.PERatio || "N/A",
-      eps: data.EPS || "N/A",
-      fiftyTwoWeekHigh: data["52WeekHigh"] || "N/A",
-      fiftyTwoWeekLow: data["52WeekLow"] || "N/A",
-      dividendYield: data.DividendYield ? `${(parseFloat(data.DividendYield) * 100).toFixed(2)}%` : "N/A",
-      sector: data.Sector || "N/A",
-      industry: data.Industry || "N/A",
-    };
-    setCachedData(cacheKey, result);
-    return result;
-  } catch (error) {
-    console.error("Failed to fetch company overview:", error);
-    return null;
-  }
-}
-
-// Fetch News Sentiment from Alpha Vantage
-async function fetchNewsSentiment(symbol: string, apiKey: string): Promise<{ items: NewsSentiment[]; overall: number } | null> {
-  const cacheKey = `news_${symbol}`;
-  const cached = getCachedData<{ items: NewsSentiment[]; overall: number }>(cacheKey, ALPHA_VANTAGE_CACHE_MS);
-  if (cached) return cached;
-
-  try {
-    const url = `${ALPHA_VANTAGE_BASE_URL}?function=NEWS_SENTIMENT&tickers=${symbol}&limit=5&apikey=${apiKey}`;
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data.Note || data.Information || !data.feed) {
-      return null;
-    }
-
-    let totalScore = 0;
-    const items: NewsSentiment[] = data.feed.slice(0, 3).map((item: Record<string, unknown>) => {
-      const tickerSentiment = (item.ticker_sentiment as Array<{ ticker: string; ticker_sentiment_score: string; ticker_sentiment_label: string }>) || [];
-      const symbolSentiment = tickerSentiment.find(t => t.ticker === symbol);
-      const score = parseFloat(symbolSentiment?.ticker_sentiment_score || item.overall_sentiment_score as string || "0");
-      totalScore += score;
-
-      return {
-        title: (item.title as string)?.slice(0, 80) + ((item.title as string)?.length > 80 ? "..." : ""),
-        sentiment: mapSentimentLabel(symbolSentiment?.ticker_sentiment_label || item.overall_sentiment_label as string || "Neutral"),
-        score,
-        source: item.source as string,
-        timeAgo: formatTimeAgo(item.time_published as string),
-      };
-    });
-
-    const result = { items, overall: items.length > 0 ? totalScore / items.length : 0 };
-    setCachedData(cacheKey, result);
-    return result;
-  } catch (error) {
-    console.error("Failed to fetch news sentiment:", error);
-    return null;
-  }
-}
-
-function mapSentimentLabel(label: string): string {
-  const lower = label.toLowerCase();
-  if (lower.includes("bullish")) return "Bullish";
-  if (lower.includes("bearish")) return "Bearish";
-  return "Neutral";
-}
-
-function formatMarketCap(value: string): string {
-  const num = parseFloat(value);
-  if (isNaN(num)) return "N/A";
-  if (num >= 1e12) return `$${(num / 1e12).toFixed(2)}T`;
-  if (num >= 1e9) return `$${(num / 1e9).toFixed(2)}B`;
-  if (num >= 1e6) return `$${(num / 1e6).toFixed(2)}M`;
-  return `$${num.toLocaleString()}`;
-}
-
-function formatTimeAgo(dateString: string): string {
-  const year = dateString.slice(0, 4);
-  const month = dateString.slice(4, 6);
-  const day = dateString.slice(6, 8);
-  const hour = dateString.slice(9, 11);
-  const minute = dateString.slice(11, 13);
-
-  const date = new Date(`${year}-${month}-${day}T${hour}:${minute}:00Z`);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return `${diffDays}d ago`;
-}
-
 function formatVolume(volume: number): string {
   if (volume >= 1_000_000_000) return (volume / 1_000_000_000).toFixed(2) + "B";
   if (volume >= 1_000_000) return (volume / 1_000_000).toFixed(2) + "M";
@@ -402,7 +186,7 @@ export async function POST(request: NextRequest) {
     let rsiData: RSIData | null = null;
     let macdData: MACDData | null = null;
     let overview: CompanyOverview | null = null;
-    let newsSentiment: { items: NewsSentiment[]; overall: number } | null = null;
+    let newsSentiment: NewsSentimentResult | null = null;
 
     if (alphaVantageKey) {
       const results = await Promise.allSettled([
@@ -426,41 +210,9 @@ export async function POST(request: NextRequest) {
     });
 
     // Build enhanced prompt with Alpha Vantage data
-    let technicalSection = "";
-    if (rsiData || macdData) {
-      technicalSection = "\n\n=== TECHNICAL INDICATORS (Real-time from Alpha Vantage) ===";
-      if (rsiData) {
-        technicalSection += `\nRSI (14-day): ${rsiData.value.toFixed(2)} (${rsiData.signal})`;
-      }
-      if (macdData) {
-        technicalSection += `\nMACD: ${macdData.macd.toFixed(4)}, Signal: ${macdData.signal.toFixed(4)}, Histogram: ${macdData.histogram.toFixed(4)} (${macdData.trend})`;
-      }
-    }
-
-    let fundamentalsSection = "";
-    if (overview) {
-      fundamentalsSection = `\n\n=== FUNDAMENTALS ===
-Market Cap: ${overview.marketCap}
-P/E Ratio: ${overview.peRatio}
-EPS: $${overview.eps}
-52-Week High: $${overview.fiftyTwoWeekHigh}
-52-Week Low: $${overview.fiftyTwoWeekLow}
-Dividend Yield: ${overview.dividendYield}
-Sector: ${overview.sector}
-Industry: ${overview.industry}`;
-    }
-
-    let newsSection = "";
-    if (newsSentiment && newsSentiment.items.length > 0) {
-      newsSection = "\n\n=== RECENT NEWS SENTIMENT (Real-time) ===";
-      newsSentiment.items.forEach((item, i) => {
-        const scoreStr = item.score >= 0 ? `+${item.score.toFixed(2)}` : item.score.toFixed(2);
-        newsSection += `\n${i + 1}. [${item.sentiment} ${scoreStr}] "${item.title}" - ${item.source}, ${item.timeAgo}`;
-      });
-      const overallStr = newsSentiment.overall >= 0 ? `+${newsSentiment.overall.toFixed(2)}` : newsSentiment.overall.toFixed(2);
-      const overallLabel = newsSentiment.overall > 0.15 ? "Bullish" : newsSentiment.overall < -0.15 ? "Bearish" : "Neutral";
-      newsSection += `\nOverall News Sentiment: ${overallLabel} (${overallStr})`;
-    }
+    const technicalSection = buildTechnicalSection(rsiData, macdData);
+    const fundamentalsSection = buildFundamentalsSection(overview);
+    const newsSection = buildNewsSection(newsSentiment);
 
     const rolePersona = councilRole ? COUNCIL_ROLE_PROMPTS[councilRole] : null;
 
