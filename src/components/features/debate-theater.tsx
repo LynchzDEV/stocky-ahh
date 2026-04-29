@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Sparkles,
@@ -17,6 +17,7 @@ import {
   TrendingDown,
   Target,
   Clock,
+  RefreshCw,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Spinner } from '@/components/ui/spinner';
@@ -28,6 +29,7 @@ interface DebateTheaterProps {
   state: DebateState;
   analysts: DebateAnalystModel[];
   chairModelName: string;
+  onGrantExtension: () => void;
 }
 
 function getPredictionLabel(p: string) {
@@ -370,8 +372,15 @@ function VerdictCard({ verdict, stopReason, dissenters }: {
   );
 }
 
-export function DebateTheater({ state, analysts, chairModelName }: DebateTheaterProps) {
-  const { phase, currentRound, maxRounds, analystStates, chairStates, verdict, stopReason, dissenters } = state;
+export function DebateTheater({ state, analysts, chairModelName, onGrantExtension }: DebateTheaterProps) {
+  const { phase, currentRound, maxRounds, analystStates, chairStates, verdict, stopReason, dissenters, extensionRequested, extensionRationale } = state;
+  const [extensionDismissed, setExtensionDismissed] = useState(false);
+  // Reset dismissed flag whenever a new extension offer arrives
+  const prevExtensionRef = useRef(false);
+  if (extensionRequested && !prevExtensionRef.current) {
+    setExtensionDismissed(false);
+  }
+  prevExtensionRef.current = extensionRequested;
 
   const roundsToShow = phase === 'idle' ? [] : Array.from(
     { length: currentRound },
@@ -445,8 +454,39 @@ export function DebateTheater({ state, analysts, chairModelName }: DebateTheater
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2 }}
+            className="space-y-3"
           >
             <VerdictCard verdict={verdict} stopReason={stopReason} dissenters={dissenters} />
+
+            {/* Extension prompt */}
+            {extensionRequested && !extensionDismissed && (
+              <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-3.5 w-3.5 text-purple-400 shrink-0" />
+                  <p className="text-xs font-medium text-purple-300">
+                    Chair recommends more debate
+                  </p>
+                </div>
+                {extensionRationale && (
+                  <p className="text-[11px] text-foreground/60 italic pl-5">{extensionRationale}</p>
+                )}
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={onGrantExtension}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/30 transition-colors"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Give 2 more rounds
+                  </button>
+                  <button
+                    onClick={() => setExtensionDismissed(true)}
+                    className="px-3 py-1.5 rounded-md text-xs font-medium bg-muted/20 hover:bg-muted/30 text-muted-foreground border border-border/30 transition-colors"
+                  >
+                    Summarize now
+                  </button>
+                </div>
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

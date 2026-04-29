@@ -75,7 +75,9 @@ function buildChairPrompt(
     },
     "riskFactors": ["<consensus risk 1>", "<consensus risk 2>", "<consensus risk 3>"]
   },
-  "analystDirectives": null
+  "analystDirectives": null,
+  "requestExtension": <boolean — true ONLY if there is genuine unresolved disagreement that 2 more rounds would meaningfully address>,
+  "extensionRationale": "<one sentence: what specific disagreement remains unresolved, or null if requestExtension is false>"
 }`
     : `{
   "shouldStop": <boolean>,

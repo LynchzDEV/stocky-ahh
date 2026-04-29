@@ -30,6 +30,8 @@ export interface ChairResponse {
   stopRuleEvaluation: StopRuleEvaluation;
   verdict: ModelAnalysis | null;
   analystDirectives: AnalystDirectives | null;
+  requestExtension?: boolean;
+  extensionRationale?: string;
 }
 
 export interface AnalystDebateState {
@@ -57,6 +59,8 @@ export interface DebateState {
   verdict: ModelAnalysis | null;
   stopReason: 'unanimous' | 'converged' | 'chair' | 'max_rounds' | null;
   dissenters: CouncilRole[];
+  extensionRequested: boolean;
+  extensionRationale: string | null;
   error: string | null;
 }
 

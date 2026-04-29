@@ -159,7 +159,7 @@ export function StockAnalyzer() {
   const [customCouncilInput, setCustomCouncilInput] = useState('');
   const [chairModelId, setChairModelId] = useState(() => defaultAI.id);
   const [customChairInput, setCustomChairInput] = useState('');
-  const { state: debateState, runDebate, reset: resetDebate } = useDebate();
+  const { state: debateState, runDebate, grantExtension, reset: resetDebate } = useDebate();
 
   // Unified AI dropdown
   const [showAiDropdown, setShowAiDropdown] = useState(false);
@@ -1402,6 +1402,7 @@ export function StockAnalyzer() {
                               };
                             })}
                             chairModelName={customChairInput.trim() || chairModelId}
+                            onGrantExtension={grantExtension}
                           />
                         )}
                     </CardContent>
