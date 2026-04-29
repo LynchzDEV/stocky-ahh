@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateText } from 'ai';
+import { jsonrepair } from 'jsonrepair';
 import { buildTranscriptText } from '@/lib/debate-utils';
 import type { DebateEntry, ChairResponse } from '@/lib/debate-types';
 
@@ -142,8 +143,9 @@ export async function POST(request: NextRequest) {
 
   const userPrompt = buildChairPrompt(symbol, currentPrice, transcript, round, forced);
 
-  try {
-    const openrouter = createOpenRouter({ apiKey: openRouterKey });
+  const openrouter = createOpenRouter({ apiKey: openRouterKey });
+
+  async function callChair() {
     const { text } = await generateText({
       model: openrouter(chairModelId),
       messages: [
@@ -155,13 +157,10 @@ export async function POST(request: NextRequest) {
     });
 
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return NextResponse.json({ error: 'Failed to parse Chair response' }, { status: 500 });
-    }
+    if (!jsonMatch) throw new Error('No JSON object found in Chair response');
 
-    const chairResponse: ChairResponse = JSON.parse(jsonMatch[0]);
+    const chairResponse: ChairResponse = JSON.parse(jsonrepair(jsonMatch[0]));
 
-    // Enforce mutual exclusion
     if (chairResponse.shouldStop) {
       chairResponse.analystDirectives = null;
     } else {
@@ -172,6 +171,16 @@ export async function POST(request: NextRequest) {
       chairResponse.analystDirectives = null;
     }
 
+    return chairResponse;
+  }
+
+  try {
+    let chairResponse;
+    try {
+      chairResponse = await callChair();
+    } catch {
+      chairResponse = await callChair();
+    }
     return NextResponse.json(chairResponse);
   } catch (err) {
     console.error('Chair error:', err);

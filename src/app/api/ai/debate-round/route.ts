@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateText } from 'ai';
+import { jsonrepair } from 'jsonrepair';
 import {
   fetchRSI,
   fetchMACD,
@@ -221,8 +222,9 @@ Volume: ${formatVolume(stockData.volume)} | Sharpe: ${stockData.sharpeRatio.toFi
 
 Provide your Round ${round} JSON analysis:`;
 
-  try {
-    const openrouter = createOpenRouter({ apiKey: openRouterKey });
+  const openrouter = createOpenRouter({ apiKey: openRouterKey });
+
+  async function callModel() {
     const { text } = await generateText({
       model: openrouter(model),
       messages: [
@@ -236,7 +238,7 @@ Provide your Round ${round} JSON analysis:`;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('No JSON object found in response');
 
-    const analysis = JSON.parse(jsonMatch[0]);
+    const analysis = JSON.parse(jsonrepair(jsonMatch[0]));
 
     if (
       typeof analysis.score !== 'number' ||
@@ -246,6 +248,16 @@ Provide your Round ${round} JSON analysis:`;
       throw new Error('Invalid analysis structure');
     }
 
+    return analysis;
+  }
+
+  try {
+    let analysis;
+    try {
+      analysis = await callModel();
+    } catch {
+      analysis = await callModel();
+    }
     return NextResponse.json({ analysis, model, councilRole, round });
   } catch (err) {
     console.error('Debate round error:', err);
