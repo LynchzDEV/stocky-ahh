@@ -54,7 +54,7 @@ function buildChairPrompt(
     "unanimous": <boolean>,
     "converged": <boolean>,
     "chairJudgment": true,
-    "chairJudgmentRationale": "<why debate is resolved>"
+    "chairJudgmentRationale": "<one sentence synthesis: what the council collectively concluded>"
   },
   "verdict": {
     "score": <number 1-10>,
@@ -110,16 +110,17 @@ If shouldStop is true, verdict must contain:
 
   return `You are chairing an AI Investment Council debate for ${symbol} at $${currentPrice}.
 
-This is after Round ${round}. ${forced ? 'This is the final round — you MUST issue a verdict.' : ''}
+After Round ${round}.
 
-Current round stats (fast-path checks for your reference):
+Current round stats:
 - Unanimous predictions: ${isUnanimous ? 'YES' : 'NO'} (${[...new Set(predictions)].join(', ')})
 - Confidence spread: ${spread === 999 ? 'N/A' : spread.toFixed(0)} points ${spread < 15 ? '(converged)' : '(spread)'}
 
 === FULL DEBATE TRANSCRIPT ===
 ${transcriptText}
-
-Evaluate the debate and respond with ONLY valid JSON matching this schema:
+${forced ? `
+Synthesize the council's collective judgment into a definitive verdict. Base it on the strongest arguments and clearest evidence in the transcript. If significant disagreement remains unresolved, set requestExtension: true and explain what specific question more rounds would settle.` : ''}
+Respond with ONLY valid JSON matching this schema:
 
 ${schema}`;
 }
