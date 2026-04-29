@@ -34,8 +34,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { CandlestickChart } from './candlestick-chart';
 import { StockNews } from './stock-news';
-import { AiCouncilPanel } from './ai-council-panel';
-import type { CouncilResult, CouncilRole } from './ai-council-panel';
+import type { CouncilRole } from './ai-council-panel';
+import { useDebate } from '@/hooks/useDebate';
+import { DebateTheater } from './debate-theater';
+import type { DebateAnalystModel, StockDataPayload } from '@/lib/debate-types';
 import { validateSymbol, RateLimiter } from '@/lib/validation';
 import type { StockData } from '@/lib/types';
 import { Spinner } from '@/components/ui/spinner';
@@ -99,6 +101,8 @@ function getSharpeInterpretation(sharpe: number): {
   };
 }
 
+const DEBATE_ROLES: CouncilRole[] = ['technical', 'fundamental', 'sentiment', 'contrarian', 'risk'];
+
 export function StockAnalyzer() {
   const [symbol, setSymbol] = useState('');
   const [loading, setLoading] = useState(false);
@@ -152,15 +156,11 @@ export function StockAnalyzer() {
   const [selectedCouncilModels, setSelectedCouncilModels] = useState<string[]>(
     [],
   );
-  const [councilResults, setCouncilResults] = useState<CouncilResult[]>([]);
-  const [councilSummaryAnalysis, setCouncilSummaryAnalysis] =
-    useState<import('./ai-council-panel').ModelAnalysis | null>(null);
-  const [councilSummaryLoading, setCouncilSummaryLoading] = useState(false);
-  const [councilSummaryError, setCouncilSummaryError] = useState<string | null>(
-    null,
-  );
   const [showCouncilPanel, setShowCouncilPanel] = useState(false);
   const [customCouncilInput, setCustomCouncilInput] = useState('');
+  const [chairModelId, setChairModelId] = useState(() => defaultAI.id);
+  const [customChairInput, setCustomChairInput] = useState('');
+  const { state: debateState, runDebate, reset: resetDebate } = useDebate();
 
   // Unified AI dropdown
   const [showAiDropdown, setShowAiDropdown] = useState(false);
@@ -331,170 +331,35 @@ export function StockAnalyzer() {
     [stockData, selectedModel, customModelInput],
   );
 
-  const runCouncil = useCallback(async () => {
+  const handleRunDebate = useCallback(() => {
     if (!stockData || selectedCouncilModels.length === 0) return;
 
-    const ROLES: CouncilRole[] = ['technical', 'fundamental', 'sentiment', 'contrarian', 'risk'];
-
-    const modelsToRun = selectedCouncilModels.map((id, idx) => {
+    const analysts: DebateAnalystModel[] = selectedCouncilModels.map((id, idx) => {
       const known = AI_MODELS.find(m => m.id === id);
       return {
-        ...(known ?? { id, name: id, provider: 'Custom', badge: undefined }),
-        councilRole: ROLES[idx % ROLES.length],
+        id,
+        name: known?.name ?? id,
+        role: DEBATE_ROLES[idx % DEBATE_ROLES.length],
       };
     });
 
-    const initial: CouncilResult[] = modelsToRun.map(m => ({
-      modelId: m.id,
-      modelName: m.name,
-      councilRole: m.councilRole,
-      analysis: null,
-      loading: true,
-      error: null,
-    }));
-    setCouncilResults(initial);
-    setCouncilSummaryAnalysis(null);
-    setCouncilSummaryLoading(false);
-    setCouncilSummaryError(null);
+    const stockPayload: StockDataPayload = {
+      name: stockData.name,
+      currentPrice: stockData.currentPrice,
+      change: stockData.change,
+      changePercent: stockData.changePercent,
+      dayHigh: stockData.dayHigh,
+      dayLow: stockData.dayLow,
+      volume: stockData.volume,
+      sharpeRatio: stockData.sharpeRatio,
+      trend: stockData.trend,
+    };
+
+    const effectiveChair = customChairInput.trim() || chairModelId;
     setShowCouncilPanel(true);
     setAiActiveTab('council');
-
-    const promises = modelsToRun.map(async model => {
-      try {
-        const res = await fetch('/api/ai', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            symbol: stockData.symbol,
-            forceRefresh: true,
-            model: model.id,
-            councilRole: model.councilRole,
-            stockData: {
-              name: stockData.name,
-              currentPrice: stockData.currentPrice,
-              change: stockData.change,
-              changePercent: stockData.changePercent,
-              dayHigh: stockData.dayHigh,
-              dayLow: stockData.dayLow,
-              volume: stockData.volume,
-              sharpeRatio: stockData.sharpeRatio,
-              trend: stockData.trend,
-            },
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'Analysis failed');
-        setCouncilResults(prev =>
-          prev.map(r =>
-            r.modelId === model.id
-              ? { ...r, analysis: data.analysis, loading: false }
-              : r,
-          ),
-        );
-        return {
-          modelId: model.id,
-          modelName: model.name,
-          councilRole: model.councilRole,
-          analysis: data.analysis,
-        };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Unknown error';
-        setCouncilResults(prev =>
-          prev.map(r =>
-            r.modelId === model.id ? { ...r, error: msg, loading: false } : r,
-          ),
-        );
-        return null;
-      }
-    });
-
-    const settled = await Promise.all(promises);
-    const successful = settled.filter(Boolean) as {
-      modelId: string;
-      modelName: string;
-      analysis: NonNullable<CouncilResult['analysis']>;
-    }[];
-
-    if (successful.length === 0) return;
-
-    setCouncilSummaryLoading(true);
-    try {
-      const summRes = await fetch('/api/ai/summarize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          symbol: stockData.symbol,
-          currentPrice: stockData.currentPrice,
-          analyses: successful,
-          defaultModel: defaultAI.id,
-        }),
-      });
-      const summData = await summRes.json();
-      if (!summRes.ok) throw new Error(summData.error || 'Summary failed');
-      setCouncilSummaryAnalysis(summData.analysis);
-    } catch (err) {
-      setCouncilSummaryError(
-        err instanceof Error ? err.message : 'Failed to summarize',
-      );
-    } finally {
-      setCouncilSummaryLoading(false);
-    }
-  }, [stockData, selectedCouncilModels, defaultAI.id]);
-
-  const retryCouncilModel = useCallback(
-    async (modelId: string) => {
-      if (!stockData) return;
-      const model = councilResults.find(r => r.modelId === modelId);
-      if (!model) return;
-
-      setCouncilResults(prev =>
-        prev.map(r =>
-          r.modelId === modelId ? { ...r, loading: true, error: null } : r,
-        ),
-      );
-
-      try {
-        const res = await fetch('/api/ai', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            symbol: stockData.symbol,
-            forceRefresh: true,
-            model: modelId,
-            councilRole: model.councilRole,
-            stockData: {
-              name: stockData.name,
-              currentPrice: stockData.currentPrice,
-              change: stockData.change,
-              changePercent: stockData.changePercent,
-              dayHigh: stockData.dayHigh,
-              dayLow: stockData.dayLow,
-              volume: stockData.volume,
-              sharpeRatio: stockData.sharpeRatio,
-              trend: stockData.trend,
-            },
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.message || 'Analysis failed');
-        setCouncilResults(prev =>
-          prev.map(r =>
-            r.modelId === modelId
-              ? { ...r, analysis: data.analysis, loading: false }
-              : r,
-          ),
-        );
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Unknown error';
-        setCouncilResults(prev =>
-          prev.map(r =>
-            r.modelId === modelId ? { ...r, error: msg, loading: false } : r,
-          ),
-        );
-      }
-    },
-    [stockData, councilResults],
-  );
+    runDebate(analysts, stockPayload, stockData.symbol, effectiveChair);
+  }, [stockData, selectedCouncilModels, chairModelId, customChairInput, AI_MODELS, runDebate]);
 
   const fetchStockData = useCallback(
     async (searchSymbol: string) => {
@@ -512,8 +377,7 @@ export function StockAnalyzer() {
       setLoading(true);
       setError(null);
       setShowCouncilPanel(false);
-      setCouncilResults([]);
-      setCouncilSummaryAnalysis(null);
+      resetDebate();
 
       try {
         const response = await fetch(
@@ -1091,18 +955,41 @@ export function StockAnalyzer() {
                                     </div>
                                   ))}
 
+                                {/* Chair model selector */}
+                                <div className="space-y-1 mt-2 pt-2 border-t border-border/20">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Chair Model</p>
+                                  <select
+                                    value={chairModelId}
+                                    onChange={e => {
+                                      setChairModelId(e.target.value);
+                                      setCustomChairInput('');
+                                    }}
+                                    className="w-full text-[11px] bg-muted border border-border rounded px-2 py-1 text-foreground"
+                                  >
+                                    {AI_MODELS.map(m => (
+                                      <option key={m.id} value={m.id}>{m.name}</option>
+                                    ))}
+                                  </select>
+                                  <Input
+                                    placeholder="or custom chair model..."
+                                    value={customChairInput}
+                                    onChange={e => setCustomChairInput(e.target.value)}
+                                    className="h-7 text-xs border-amber-500/20 bg-transparent placeholder:text-muted-foreground/50"
+                                  />
+                                </div>
+
                                 <Button
                                   size="sm"
                                   className="w-full h-7 text-xs bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border-purple-500/30"
                                   variant="outline"
-                                  disabled={selectedCouncilModels.length < 2}
+                                  disabled={selectedCouncilModels.length < 2 || debateState.phase === 'round' || debateState.phase === 'chair'}
                                   onClick={() => {
-                                    runCouncil();
+                                    handleRunDebate();
                                     setShowAiDropdown(false);
                                   }}
                                 >
                                   <Users className="h-3.5 w-3.5 mr-1" />
-                                  Run Council ({selectedCouncilModels.length}/5)
+                                  Run Debate ({selectedCouncilModels.length}/5)
                                 </Button>
                               </div>
                             </div>
@@ -1504,14 +1391,18 @@ export function StockAnalyzer() {
 
                       {/* AI Council tab content */}
                       {showCouncilPanel &&
-                        (!showAiPanel || aiActiveTab === 'council') &&
-                        councilResults.length > 0 && (
-                          <AiCouncilPanel
-                            results={councilResults}
-                            summaryAnalysis={councilSummaryAnalysis}
-                            summaryLoading={councilSummaryLoading}
-                            summaryError={councilSummaryError}
-                            onRetryModel={retryCouncilModel}
+                        (!showAiPanel || aiActiveTab === 'council') && (
+                          <DebateTheater
+                            state={debateState}
+                            analysts={selectedCouncilModels.map((id, idx) => {
+                              const known = AI_MODELS.find(m => m.id === id);
+                              return {
+                                id,
+                                name: known?.name ?? id,
+                                role: DEBATE_ROLES[idx % DEBATE_ROLES.length],
+                              };
+                            })}
+                            chairModelName={customChairInput.trim() || chairModelId}
                           />
                         )}
                     </CardContent>
