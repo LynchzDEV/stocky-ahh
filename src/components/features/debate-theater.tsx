@@ -97,24 +97,29 @@ function RoundSteps({ currentRound, maxRounds, phase }: { currentRound: number; 
 function AnalystTile({
   analyst,
   analystState,
-  currentRound,
+  displayRound,
+  isActiveRound,
 }: {
   analyst: DebateAnalystModel;
   analystState: DebateState['analystStates'][string];
-  currentRound: number;
+  displayRound: number;
+  isActiveRound: boolean;
 }) {
   const roleInfo = COUNCIL_ROLE_LABELS[analyst.role as CouncilRole];
   const rounds = analystState?.rounds ?? [];
-  const current = rounds[rounds.length - 1];
-  const prev = rounds.length >= 2 ? rounds[rounds.length - 2] : null;
+  const current = rounds[displayRound - 1] ?? null;
+  const prev = displayRound >= 2 ? (rounds[displayRound - 2] ?? null) : null;
+
+  const loading = isActiveRound && !!analystState?.loading;
+  const error = isActiveRound ? (analystState?.error ?? null) : null;
 
   return (
     <div
       className={cn(
         'p-2.5 rounded-lg border transition-colors',
-        analystState?.loading
+        loading
           ? 'border-purple-500/30 bg-purple-500/5'
-          : analystState?.error
+          : error
           ? 'border-red-500/20 bg-red-500/5'
           : current
           ? 'border-border/40 bg-muted/10'
@@ -130,11 +135,11 @@ function AnalystTile({
             {roleInfo?.short ?? analyst.role}
           </p>
         </div>
-        {analystState?.loading && <Spinner size="sm" />}
-        {!analystState?.loading && current && (
+        {loading && <Spinner size="sm" />}
+        {!loading && current && (
           <Check className="h-3 w-3 text-green-400 shrink-0" />
         )}
-        {analystState?.error && (
+        {error && (
           <AlertTriangle className="h-3 w-3 text-red-400 shrink-0" />
         )}
       </div>
@@ -152,11 +157,11 @@ function AnalystTile({
         </div>
       )}
 
-      {!current && !analystState?.loading && !analystState?.error && (
+      {!current && !loading && !error && (
         <p className="text-[10px] text-muted-foreground">Waiting…</p>
       )}
-      {analystState?.error && (
-        <p className="text-[10px] text-red-400 truncate">{analystState.error}</p>
+      {error && (
+        <p className="text-[10px] text-red-400 truncate">{error}</p>
       )}
     </div>
   );
@@ -369,7 +374,7 @@ export function DebateTheater({ state, analysts, chairModelName }: DebateTheater
   const { phase, currentRound, maxRounds, analystStates, chairStates, verdict, stopReason, dissenters } = state;
 
   const roundsToShow = phase === 'idle' ? [] : Array.from(
-    { length: phase === 'verdict' ? maxRounds : currentRound },
+    { length: currentRound },
     (_, i) => i + 1,
   );
 
@@ -421,7 +426,8 @@ export function DebateTheater({ state, analysts, chairModelName }: DebateTheater
                   key={analyst.id}
                   analyst={analyst}
                   analystState={analystStates[analyst.id]}
-                  currentRound={round}
+                  displayRound={round}
+                  isActiveRound={round === currentRound && phase !== 'verdict'}
                 />
               ))}
             </div>
