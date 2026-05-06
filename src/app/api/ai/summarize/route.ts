@@ -95,7 +95,7 @@ Risks: ${a.analysis.riskFactors.join('; ')}`,
 
 ${analysisText}
 
-Synthesize these analyses into a consensus view. Return ONLY valid JSON (no markdown, no explanation):
+Synthesize these analyses into a consensus view targeting a medium-term investment horizon of 1-3 months minimum. The consensus timeframe should reflect this — do not output a timeframe shorter than 1 month. Return ONLY valid JSON (no markdown, no explanation):
 {
   "score": ${Math.round(avgScore)},
   "prediction": "<UP or DOWN or HOLD — pick the majority view>",

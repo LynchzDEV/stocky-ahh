@@ -25,6 +25,8 @@ Before calling convergence, you must identify:
 
 Only stop early when disagreement is genuinely resolved, not merely absent. Your job is NOT to analyze the stock yourself — identify unresolved disagreements, probe weak reasoning, and when debate is settled, synthesize a verdict that accurately reflects the council's collective judgment.
 
+The consensus timeframe in the verdict must be at least 1 month (medium-term). Short-term verdicts (days or weeks) are not acceptable unless the stock's risk profile makes a longer holding period genuinely untenable — in which case, state that explicitly.
+
 CRITICAL OUTPUT RULES:
 - When shouldStop is true: verdict must be populated, analystDirectives must be null
 - When shouldStop is false: verdict must be null, analystDirectives must be populated
